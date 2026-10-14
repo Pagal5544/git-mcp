@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import type { Env } from "./types";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import { Hono } from "hono";
 import { Octokit } from "octokit";
@@ -109,7 +110,7 @@ async function redirectToGithub(
 		headers: {
 			...headers,
 			location: getUpstreamAuthorizeUrl({
-				client_id: env.GITHUB_CLIENT_ID,
+				client_id: env.GITHUB_OAUTH_CLIENT_ID,
 				redirect_uri: new URL("/callback", request.url).href,
 				scope: "read:user",
 				state: stateToken,
@@ -160,8 +161,8 @@ app.get("/callback", async (c) => {
 
 	// Exchange the code for an access token
 	const [accessToken, errResponse] = await fetchUpstreamAuthToken({
-		client_id: c.env.GITHUB_CLIENT_ID,
-		client_secret: c.env.GITHUB_CLIENT_SECRET,
+		client_id: c.env.GITHUB_OAUTH_CLIENT_ID,
+		client_secret: c.env.GITHUB_OAUTH_CLIENT_SECRET,
 		code: c.req.query("code"),
 		redirect_uri: new URL("/callback", c.req.url).href,
 		upstream_url: "https://github.com/login/oauth/access_token",
