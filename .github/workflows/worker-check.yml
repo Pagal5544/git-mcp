@@ -1,0 +1,41 @@
+
+name: Worker Type Check
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "wrangler.jsonc"
+      - "tsconfig.json"
+      - ".github/workflows/worker-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Install and Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Validate Wrangler configuration
+        run: npx wrangler deploy --dry-run
