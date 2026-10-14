@@ -1,5 +1,6 @@
 
-import { McpAgent } from "agents/mcp";
+import { McpServer } from "@modelcontextprotocol/server";
+import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
 
 interface Env {
@@ -7,24 +8,6 @@ interface Env {
   GITHUB_OWNER: string;
   GITHUB_REPO: string;
   MCP_AUTH_TOKEN: string;
-}
-
-type ToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-};
-
-function result(value: unknown): ToolResult {
-  return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }]
-  };
-}
-
-function errorResult(message: string): ToolResult {
-  return {
-    content: [{ type: "text", text: message }],
-    isError: true
-  };
 }
 
 async function github(
@@ -46,161 +29,181 @@ async function github(
   const text = await response.text();
 
   if (!response.ok) {
-    throw new Error(`GitHub API ${response.status}: ${text.slice(0, 1200)}`);
+    throw new Error(
+      `GitHub API ${response.status}: ${text.slice(0, 1000)}`
+    );
   }
 
   return text ? JSON.parse(text) : {};
 }
 
-export class GitMcpAgent extends McpAgent {
-  server = this.createMcpServer({
+function textResult(value: unknown) {
+  return {
+    content: [
+      { type: "text" as const, text: JSON.stringify(value, null, 2) }
+    ]
+  };
+}
+
+function errorResult(error: unknown) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text" as const,
+        text: error instanceof Error ? error.message : "Request failed"
+      }
+    ]
+  };
+}
+
+function createServer(env: Env) {
+  const server = new McpServer({
     name: "git-mcp",
     version: "1.0.0"
   });
 
-  async init() {
-    const env = this.env as unknown as Env;
-
-    this.server.tool(
-      "github_repo_info",
-      "Read basic information about the configured GitHub repository.",
-      {},
-      async () => {
-        try {
-          const data = await github(
-            env,
-            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}`
-          );
-
-          return result(data);
-        } catch (error) {
-          return errorResult(
-            error instanceof Error ? error.message : "GitHub request failed"
-          );
-        }
-      }
-    );
-
-    this.server.tool(
-      "github_list_workflows",
-      "List GitHub Actions workflows in the configured repository.",
-      {},
-      async () => {
-        try {
-          const data = await github(
-            env,
-            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/workflows`
-          );
-
-          return result(data);
-        } catch (error) {
-          return errorResult(
-            error instanceof Error ? error.message : "GitHub request failed"
-          );
-        }
-      }
-    );
-
-    this.server.tool(
-      "github_trigger_workflow",
-      "Dispatch an existing workflow by filename. Only use a workflow filename the repository actually contains.",
-      {
-        workflow_id: z.string().min(1).max(200),
-        ref: z.string().min(1).max(200).default("main")
-      },
-      async ({ workflow_id, ref }) => {
-        try {
-          const safeWorkflow = workflow_id.split("/").pop() || "";
-
-          if (
-            safeWorkflow.includes("..") ||
-            !/^[A-Za-z0-9_.-]+\.ya?ml$/i.test(safeWorkflow)
-          ) {
-            return errorResult("Invalid workflow filename.");
-          }
-
-          const body = {
-            ref,
-            inputs: {}
-          };
-
+  server.registerTool(
+    "github_repo_info",
+    {
+      description: "Read information about the configured GitHub repository.",
+      inputSchema: {}
+    },
+    async () => {
+      try {
+        return textResult(
           await github(
             env,
-            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/workflows/${encodeURIComponent(safeWorkflow)}/dispatches`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body)
-            }
-          );
-
-          return result({
-            success: true,
-            workflow: safeWorkflow,
-            ref,
-            message: "Workflow dispatch request accepted."
-          });
-        } catch (error) {
-          return errorResult(
-            error instanceof Error ? error.message : "Workflow dispatch failed"
-          );
-        }
+            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}`
+          )
+        );
+      } catch (error) {
+        return errorResult(error);
       }
-    );
+    }
+  );
 
-    this.server.tool(
-      "github_recent_workflow_runs",
-      "List recent GitHub Actions runs.",
-      {
+  server.registerTool(
+    "github_list_workflows",
+    {
+      description: "List workflows in the configured GitHub repository.",
+      inputSchema: {}
+    },
+    async () => {
+      try {
+        return textResult(
+          await github(
+            env,
+            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/workflows`
+          )
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "github_trigger_workflow",
+    {
+      description: "Dispatch an existing GitHub Actions workflow by filename.",
+      inputSchema: {
+        workflow_id: z.string().min(1).max(200),
+        ref: z.string().min(1).max(200).default("main")
+      }
+    },
+    async ({ workflow_id, ref }) => {
+      try {
+        const filename = workflow_id.split("/").pop() ?? "";
+
+        if (!/^[A-Za-z0-9_.-]+\.ya?ml$/i.test(filename) ||
+            filename.includes("..")) {
+          return errorResult(new Error("Invalid workflow filename."));
+        }
+
+        await github(
+          env,
+          `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/workflows/${encodeURIComponent(filename)}/dispatches`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ref })
+          }
+        );
+
+        return textResult({
+          success: true,
+          workflow: filename,
+          ref
+        });
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    "github_recent_workflow_runs",
+    {
+      description: "List recent GitHub Actions runs.",
+      inputSchema: {
         per_page: z.number().int().min(1).max(20).default(5)
-      },
-      async ({ per_page }) => {
-        try {
-          const data = await github(
+      }
+    },
+    async ({ per_page }) => {
+      try {
+        return textResult(
+          await github(
             env,
             `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/runs?per_page=${per_page}`
-          );
-
-          return result(data);
-        } catch (error) {
-          return errorResult(
-            error instanceof Error ? error.message : "Could not list workflow runs"
-          );
-        }
+          )
+        );
+      } catch (error) {
+        return errorResult(error);
       }
-    );
-  }
+    }
+  );
+
+  return server;
 }
 
 function isAuthorized(request: Request, env: Env): boolean {
   const expected = env.MCP_AUTH_TOKEN;
   if (!expected || expected.length < 32) return false;
 
-  const authorization = request.headers.get("Authorization") || "";
+  const authorization = request.headers.get("Authorization") ?? "";
   const supplied = authorization.startsWith("Bearer ")
     ? authorization.slice(7)
     : "";
 
   if (!supplied || supplied.length !== expected.length) return false;
 
-  let diff = 0;
+  let difference = 0;
   for (let i = 0; i < expected.length; i++) {
-    diff |= expected.charCodeAt(i) ^ supplied.charCodeAt(i);
+    difference |= expected.charCodeAt(i) ^ supplied.charCodeAt(i);
   }
-  return diff === 0;
+
+  return difference === 0;
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
-      return Response.json({ status: "ok", service: "git-mcp" });
+      return Response.json({
+        status: "ok",
+        service: "git-mcp"
+      });
     }
 
     if (!isAuthorized(request, env)) {
       return Response.json(
-        { error: "Unauthorized. Supply a valid bearer token." },
+        { error: "Unauthorized" },
         {
           status: 401,
           headers: { "Cache-Control": "no-store" }
@@ -208,6 +211,8 @@ export default {
       );
     }
 
-    return GitMcpAgent.serve("/mcp").fetch(request, env);
+    return createMcpHandler(() => createServer(env), {
+      route: "/mcp"
+    })(request, env, ctx);
   }
-};
+} satisfies ExportedHandler<Env>;
