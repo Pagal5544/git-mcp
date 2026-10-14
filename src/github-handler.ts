@@ -30,7 +30,7 @@ app.get("/authorize", async (c) => {
 		// Skip approval dialog but still create secure state and bind to session
 		const { stateToken } = await createOAuthState(oauthReqInfo, c.env.OAUTH_KV);
 		const { setCookie: sessionBindingCookie } = await bindStateToSession(stateToken);
-		return redirectToGithub(c.req.raw, stateToken, { "Set-Cookie": sessionBindingCookie });
+		return redirectToGithub(c.req.raw, stateToken, c.env.GITHUB_OAUTH_CLIENT_ID, { "Set-Cookie": sessionBindingCookie });
 	}
 
 	// Generate CSRF protection for the approval form
@@ -90,7 +90,7 @@ app.post("/authorize", async (c) => {
 		headers.append("Set-Cookie", approvedClientCookie);
 		headers.append("Set-Cookie", sessionBindingCookie);
 
-		return redirectToGithub(c.req.raw, stateToken, Object.fromEntries(headers));
+		return redirectToGithub(c.req.raw, stateToken, c.env.GITHUB_OAUTH_CLIENT_ID, Object.fromEntries(headers));
 	} catch (error: any) {
 		console.error("POST /authorize error:", error);
 		if (error instanceof OAuthError) {
@@ -104,13 +104,14 @@ app.post("/authorize", async (c) => {
 async function redirectToGithub(
 	request: Request,
 	stateToken: string,
+	clientId: string,
 	headers: Record<string, string> = {},
 ) {
 	return new Response(null, {
 		headers: {
 			...headers,
 			location: getUpstreamAuthorizeUrl({
-				client_id: env.GITHUB_OAUTH_CLIENT_ID,
+				client_id: clientId,
 				redirect_uri: new URL("/callback", request.url).href,
 				scope: "read:user",
 				state: stateToken,
@@ -161,7 +162,7 @@ app.get("/callback", async (c) => {
 
 	// Exchange the code for an access token
 	const [accessToken, errResponse] = await fetchUpstreamAuthToken({
-		client_id: env.GITHUB_OAUTH_CLIENT_ID,
+		client_id: c.env.GITHUB_OAUTH_CLIENT_ID,
 		client_secret: c.env.GITHUB_OAUTH_CLIENT_SECRET,
 		code: c.req.query("code"),
 		redirect_uri: new URL("/callback", c.req.url).href,
