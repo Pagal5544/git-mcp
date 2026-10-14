@@ -1,218 +1,56 @@
-
-import { McpServer } from "@modelcontextprotocol/server";
-import { createMcpHandler } from "agents/mcp/server";
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpAgent } from "agents/mcp";
 import { z } from "zod";
+import type { Env } from "./types";
+import { GitHubHandler } from "./github-handler";
 
-interface Env {
-  GITHUB_TOKEN: string;
-  GITHUB_OWNER: string;
-  GITHUB_REPO: string;
-  MCP_AUTH_TOKEN: string;
-}
+export class GitMcp extends McpAgent<Env, Record<string, never>, Record<string, never>> {
+  server = new McpServer({ name: "git-mcp", version: "1.0.0" });
 
-async function github(
-  env: Env,
-  path: string,
-  init: RequestInit = {}
-): Promise<unknown> {
-  const response = await fetch(`https://api.github.com${path}`, {
-    ...init,
-    headers: {
+  async init() {
+    const headers = {
+      Authorization: `Bearer ${this.env.GITHUB_TOKEN}`,
       Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
       "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "git-mcp-bridge",
-      ...(init.headers || {})
-    }
-  });
-
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(
-      `GitHub API ${response.status}: ${text.slice(0, 1000)}`
-    );
-  }
-
-  return text ? JSON.parse(text) : {};
-}
-
-function textResult(value: unknown) {
-  return {
-    content: [
-      { type: "text" as const, text: JSON.stringify(value, null, 2) }
-    ]
-  };
-}
-
-function errorResult(error: unknown) {
-  return {
-    isError: true,
-    content: [
-      {
-        type: "text" as const,
-        text: error instanceof Error ? error.message : "Request failed"
-      }
-    ]
-  };
-}
-
-function createServer(env: Env) {
-  const server = new McpServer({
-    name: "git-mcp",
-    version: "1.0.0"
-  });
-
-  server.registerTool(
-    "github_repo_info",
-    {
-      description: "Read information about the configured GitHub repository.",
-      inputSchema: {}
-    },
-    async () => {
-      try {
-        return textResult(
-          await github(
-            env,
-            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}`
-          )
-        );
-      } catch (error) {
-        return errorResult(error);
-      }
-    }
-  );
-
-  server.registerTool(
-    "github_list_workflows",
-    {
-      description: "List workflows in the configured GitHub repository.",
-      inputSchema: {}
-    },
-    async () => {
-      try {
-        return textResult(
-          await github(
-            env,
-            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/workflows`
-          )
-        );
-      } catch (error) {
-        return errorResult(error);
-      }
-    }
-  );
-
-  server.registerTool(
-    "github_trigger_workflow",
-    {
-      description: "Dispatch an existing GitHub Actions workflow by filename.",
-      inputSchema: {
-        workflow_id: z.string().min(1).max(200),
-        ref: z.string().min(1).max(200).default("main")
-      }
-    },
-    async ({ workflow_id, ref }) => {
-      try {
-        const filename = workflow_id.split("/").pop() ?? "";
-
-        if (!/^[A-Za-z0-9_.-]+\.ya?ml$/i.test(filename) ||
-            filename.includes("..")) {
-          return errorResult(new Error("Invalid workflow filename."));
-        }
-
-        await github(
-          env,
-          `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/workflows/${encodeURIComponent(filename)}/dispatches`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ref })
-          }
-        );
-
-        return textResult({
-          success: true,
-          workflow: filename,
-          ref
-        });
-      } catch (error) {
-        return errorResult(error);
-      }
-    }
-  );
-
-  server.registerTool(
-    "github_recent_workflow_runs",
-    {
-      description: "List recent GitHub Actions runs.",
-      inputSchema: {
-        per_page: z.number().int().min(1).max(20).default(5)
-      }
-    },
-    async ({ per_page }) => {
-      try {
-        return textResult(
-          await github(
-            env,
-            `/repos/${encodeURIComponent(env.GITHUB_OWNER)}/${encodeURIComponent(env.GITHUB_REPO)}/actions/runs?per_page=${per_page}`
-          )
-        );
-      } catch (error) {
-        return errorResult(error);
-      }
-    }
-  );
-
-  return server;
-}
-
-function isAuthorized(request: Request, env: Env): boolean {
-  const expected = env.MCP_AUTH_TOKEN;
-  if (!expected || expected.length < 32) return false;
-
-  const authorization = request.headers.get("Authorization") ?? "";
-  const supplied = authorization.startsWith("Bearer ")
-    ? authorization.slice(7)
-    : "";
-
-  if (!supplied || supplied.length !== expected.length) return false;
-
-  let difference = 0;
-  for (let i = 0; i < expected.length; i++) {
-    difference |= expected.charCodeAt(i) ^ supplied.charCodeAt(i);
-  }
-
-  return difference === 0;
-}
-
-export default {
-  async fetch(
-    request: Request,
-    env: Env,
-    ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/health") {
-      return Response.json({
-        status: "ok",
-        service: "git-mcp"
+      "User-Agent": "git-mcp"
+    };
+    this.server.tool("github_repo_info", "Get configured repository information", {}, async () => {
+      const r = await fetch(`https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}`, { headers });
+      if (!r.ok) return { content: [{ type: "text" as const, text: `GitHub API error ${r.status}: ${await r.text()}` }], isError: true };
+      return { content: [{ type: "text" as const, text: JSON.stringify(await r.json(), null, 2) }] };
+    });
+    this.server.tool("github_list_workflows", "List GitHub Actions workflows", {}, async () => {
+      const r = await fetch(`https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/actions/workflows`, { headers });
+      if (!r.ok) return { content: [{ type: "text" as const, text: `GitHub API error ${r.status}: ${await r.text()}` }], isError: true };
+      const d: any = await r.json();
+      return { content: [{ type: "text" as const, text: JSON.stringify(d.workflows, null, 2) }] };
+    });
+    this.server.tool("github_trigger_workflow", "Trigger a workflow_dispatch event", {
+      workflow_id: z.string().min(1), ref: z.string().min(1)
+    }, async ({ workflow_id, ref }) => {
+      const r = await fetch(`https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/actions/workflows/${encodeURIComponent(workflow_id)}/dispatches`, {
+        method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ ref })
       });
-    }
-
-    if (!isAuthorized(request, env)) {
-      return Response.json(
-        { error: "Unauthorized" },
-        {
-          status: 401,
-          headers: { "Cache-Control": "no-store" }
-        }
-      );
-    }
-
-    return createMcpHandler(() => createServer(env), {
-      route: "/mcp"
-    })(request, env, ctx);
+      if (r.status !== 204) return { content: [{ type: "text" as const, text: `Dispatch failed ${r.status}: ${await r.text()}` }], isError: true };
+      return { content: [{ type: "text" as const, text: `Workflow ${workflow_id} triggered on ${ref}` }] };
+    });
+    this.server.tool("github_recent_workflow_runs", "List recent workflow runs", {
+      per_page: z.number().int().min(1).max(100).optional()
+    }, async ({ per_page }) => {
+      const r = await fetch(`https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}/actions/runs?per_page=${per_page ?? 10}`, { headers });
+      if (!r.ok) return { content: [{ type: "text" as const, text: `GitHub API error ${r.status}: ${await r.text()}` }], isError: true };
+      const d: any = await r.json();
+      return { content: [{ type: "text" as const, text: JSON.stringify(d.workflow_runs, null, 2) }] };
+    });
   }
-} satisfies ExportedHandler<Env>;
+}
+
+export default new OAuthProvider({
+  apiHandler: GitMcp.serve("/mcp"),
+  apiRoute: "/mcp",
+  authorizeEndpoint: "/authorize",
+  clientRegistrationEndpoint: "/register",
+  defaultHandler: GitHubHandler as any,
+  tokenEndpoint: "/token"
+});

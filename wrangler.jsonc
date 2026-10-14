@@ -1,13 +1,11 @@
-
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "git-mcp",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-14",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  "observability": {
-    "enabled": true
-  }
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "durable_objects": { "bindings": [{ "name": "MCP_OBJECT", "class_name": "GitMcp" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GitMcp"] }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "1fd9c38852d44babb2db1671fb7305dc" }]
 }
