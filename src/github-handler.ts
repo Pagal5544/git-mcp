@@ -19,8 +19,14 @@ import {
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
 
 app.get("/authorize", async (c) => {
-	const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
-	const { clientId } = oauthReqInfo;
+  let oauthReqInfo;
+  try {
+    oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
+  } catch (error) {
+    console.error("GET /authorize parseAuthRequest error:", error);
+    return c.text("Invalid or incomplete OAuth authorization request. Start authorization from your MCP client.", 400);
+  }
+    const { clientId } = oauthReqInfo;
 	if (!clientId) {
 		return c.text("Invalid request", 400);
 	}
