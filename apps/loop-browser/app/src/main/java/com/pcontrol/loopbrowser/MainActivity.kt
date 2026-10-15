@@ -37,44 +37,71 @@ class MainActivity : Activity() {
     }
 
     private fun buildUi() {
+        window.statusBarColor = 0xFFF5F7FB.toInt()
+        window.navigationBarColor = 0xFFF5F7FB.toInt()
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+            View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFF5F7FB.toInt())
+            // Respect status/navigation bars on Android versions that enforce edge-to-edge.
+            setOnApplyWindowInsetsListener { view, insets ->
+                view.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
+                insets
+            }
         }
+
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(8, 8, 8, 4)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(8.dp(), 4.dp(), 8.dp(), 4.dp())
         }
         address = EditText(this).apply {
             setSingleLine(true)
             hint = "Enter URL or search"
             setText("https://example.com")
             imeOptions = EditorInfo.IME_ACTION_GO
-            layoutParams = LinearLayout.LayoutParams(0, 48.dp(), 1f)
+            textSize = 16f
+            setPadding(10.dp(), 0, 8.dp(), 0)
+            layoutParams = LinearLayout.LayoutParams(0, 48.dp(), 1f).apply {
+                marginEnd = 6.dp()
+            }
         }
         bar.addView(address)
         bar.addView(Button(this).apply {
             text = "Go"
+            isAllCaps = false
+            minWidth = 56.dp()
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, 44.dp()
+            )
             setOnClickListener { navigate(address.text.toString()) }
         })
         root.addView(bar)
+
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(8, 0, 8, 4)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(8.dp(), 0, 8.dp(), 4.dp())
         }
-        actions.addView(Button(this).apply {
-            text = "Back"
-            setOnClickListener { if (browser.canGoBack()) browser.goBack() }
-        })
-        actions.addView(Button(this).apply {
-            text = "Reload"
-            setOnClickListener { browser.reload() }
-        })
-        actions.addView(Button(this).apply {
-            text = "Capture"
-            setOnClickListener { captureViewport() }
-        })
+        fun addAction(label: String, action: () -> Unit) {
+            actions.addView(Button(this).apply {
+                text = label
+                isAllCaps = false
+                minWidth = 0
+                setPadding(4.dp(), 0, 4.dp(), 0)
+                layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f).apply {
+                    marginEnd = 4.dp()
+                }
+                setOnClickListener { action() }
+            })
+        }
+        addAction("Back") { if (browser.canGoBack()) browser.goBack() }
+        addAction("Reload") { browser.reload() }
+        addAction("Capture") { captureViewport() }
         root.addView(actions)
+
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             visibility = View.GONE
@@ -82,12 +109,16 @@ class MainActivity : Activity() {
         root.addView(progress, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 3.dp()
         ))
+
         status = TextView(this).apply {
             text = "Loop Browser • local prototype"
-            setPadding(10, 4, 10, 4)
+            setPadding(10.dp(), 4.dp(), 10.dp(), 6.dp())
             textSize = 12f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
         root.addView(status)
+
         browser = WebView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -95,6 +126,8 @@ class MainActivity : Activity() {
         }
         root.addView(browser)
         setContentView(root)
+        root.requestApplyInsets()
+
         address.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO) {
                 navigate(address.text.toString())
