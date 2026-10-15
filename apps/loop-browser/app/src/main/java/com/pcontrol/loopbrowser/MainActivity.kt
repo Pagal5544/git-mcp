@@ -303,7 +303,7 @@ class MainActivity : Activity() {
 
     private fun setControlStripHidden(hidden: Boolean) {
         stripHidden = hidden
-        displayRow.visibility = if (hidden) View.GONE else View.VISIBLE
+        displayRow.visibility = View.VISIBLE
         stripToggleButton.visibility = View.GONE
         stripToggleButton.text = "×"
         stripToggleButton.contentDescription = "Hide fullscreen controls"
