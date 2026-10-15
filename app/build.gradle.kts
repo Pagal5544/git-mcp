@@ -22,4 +22,5 @@ android {
 
 dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("androidx.activity:activity:1.9.3")
 }
