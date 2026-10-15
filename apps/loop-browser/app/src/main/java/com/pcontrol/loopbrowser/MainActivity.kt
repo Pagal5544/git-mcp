@@ -238,8 +238,8 @@ class MainActivity : Activity() {
         }
         browserFrame.addView(browser)
         stripToggleButton = Button(this).apply {
-            text = "☰"
-            contentDescription = "Show browser controls"
+            text = "×"
+            contentDescription = "Hide fullscreen controls"
             isAllCaps = false
             minWidth = 40.dp()
             minHeight = 40.dp()
@@ -304,9 +304,9 @@ class MainActivity : Activity() {
     private fun setControlStripHidden(hidden: Boolean) {
         stripHidden = hidden
         displayRow.visibility = if (hidden) View.GONE else View.VISIBLE
-        stripToggleButton.visibility = if (fullscreenMode) View.VISIBLE else View.GONE
-        stripToggleButton.text = if (hidden) "☰" else "×"
-        stripToggleButton.contentDescription = if (hidden) "Show browser controls" else "Hide browser controls"
+        stripToggleButton.visibility = View.GONE
+        stripToggleButton.text = "×"
+        stripToggleButton.contentDescription = "Hide fullscreen controls"
         stripToggleButton.gravity = android.view.Gravity.CENTER_VERTICAL or if (hidden) android.view.Gravity.END else android.view.Gravity.START
         stripToggleButton.setPadding(if (hidden) 0 else 12.dp(), 0, if (hidden) 12.dp() else 0, 0)
     }
@@ -320,7 +320,7 @@ class MainActivity : Activity() {
         status.visibility = if (fullscreenMode) View.GONE else
             if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         progress.visibility = if (fullscreenMode) View.GONE else progress.visibility
-        fullscreenButton.text = if (fullscreenMode) "Exit full" else "Full"
+        fullscreenButton.text = if (fullscreenMode) "Collapse" else "Expand"
         if (!fullscreenMode) {
             setControlStripHidden(false)
         } else {
