@@ -33,6 +33,8 @@ class MainActivity : Activity() {
     private lateinit var selectorInput: EditText
     private lateinit var loopButton: Button
     private lateinit var desktopButton: Button
+    private lateinit var automationToggle: Button
+    private lateinit var automationPanel: LinearLayout
     private var desktopMode = false
     private var mobileUserAgent: String = ""
     private val loopHandler = Handler(Looper.getMainLooper())
@@ -64,17 +66,17 @@ class MainActivity : Activity() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(8.dp(), 4.dp(), 8.dp(), 4.dp())
+            setPadding(6.dp(), 1.dp(), 6.dp(), 1.dp())
         }
         address = EditText(this).apply {
             setSingleLine(true)
             hint = "Enter URL or search"
             setText("https://example.com")
             imeOptions = EditorInfo.IME_ACTION_GO
-            textSize = 16f
-            setPadding(10.dp(), 0, 8.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, 48.dp(), 1f).apply {
-                marginEnd = 6.dp()
+            textSize = 15f
+            setPadding(8.dp(), 0, 6.dp(), 0)
+            layoutParams = LinearLayout.LayoutParams(0, 40.dp(), 1f).apply {
+                marginEnd = 4.dp()
             }
         }
         bar.addView(address)
@@ -83,7 +85,7 @@ class MainActivity : Activity() {
             isAllCaps = false
             minWidth = 56.dp()
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, 44.dp()
+                ViewGroup.LayoutParams.WRAP_CONTENT, 38.dp()
             )
             setOnClickListener { navigate(address.text.toString()) }
         })
@@ -92,7 +94,7 @@ class MainActivity : Activity() {
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(8.dp(), 0, 8.dp(), 4.dp())
+            setPadding(6.dp(), 0, 6.dp(), 1.dp())
         }
         fun addAction(label: String, action: () -> Unit) {
             actions.addView(Button(this).apply {
@@ -100,8 +102,8 @@ class MainActivity : Activity() {
                 isAllCaps = false
                 minWidth = 0
                 setPadding(4.dp(), 0, 4.dp(), 0)
-                layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f).apply {
-                    marginEnd = 4.dp()
+                layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f).apply {
+                    marginEnd = 3.dp()
                 }
                 setOnClickListener { action() }
             })
@@ -109,26 +111,35 @@ class MainActivity : Activity() {
         addAction("Back") { if (browser.canGoBack()) browser.goBack() }
         addAction("Reload") { browser.reload() }
         addAction("Capture") { captureViewport() }
-        root.addView(actions)
-
-        val displayRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(8.dp(), 0, 8.dp(), 4.dp())
-        }
         desktopButton = Button(this).apply {
-            text = "Desktop mode: Off"
+            text = "Desktop: Off"
             isAllCaps = false
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 42.dp()
-            )
+            textSize = 12f
+            setPadding(2.dp(), 0, 2.dp(), 0)
+            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f).apply {
+                marginEnd = 3.dp()
+            }
             setOnClickListener { toggleDesktopMode() }
         }
-        displayRow.addView(desktopButton)
-        root.addView(displayRow)
+        actions.addView(desktopButton)
+        automationToggle = Button(this).apply {
+            text = "Tools"
+            isAllCaps = false
+            textSize = 12f
+            setPadding(2.dp(), 0, 2.dp(), 0)
+            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f)
+            setOnClickListener {
+                automationPanel.visibility = if (automationPanel.visibility == View.GONE) View.VISIBLE else View.GONE
+                text = if (automationPanel.visibility == View.VISIBLE) "Hide tools" else "Tools"
+            }
+        }
+        actions.addView(automationToggle)
+        root.addView(actions)
 
-        val automationPanel = LinearLayout(this).apply {
+        automationPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(8.dp(), 0, 8.dp(), 4.dp())
+            setPadding(6.dp(), 0, 6.dp(), 1.dp())
+            visibility = View.GONE
         }
         selectorInput = EditText(this).apply {
             setSingleLine(true)
@@ -136,7 +147,7 @@ class MainActivity : Activity() {
             textSize = 14f
             setPadding(8.dp(), 0, 8.dp(), 0)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 44.dp()
+                ViewGroup.LayoutParams.MATCH_PARENT, 36.dp()
             )
         }
         automationPanel.addView(selectorInput)
@@ -147,7 +158,7 @@ class MainActivity : Activity() {
         loopButton = Button(this).apply {
             text = "Start Observe Loop"
             isAllCaps = false
-            layoutParams = LinearLayout.LayoutParams(0, 42.dp(), 1f).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f).apply {
                 marginEnd = 4.dp()
             }
             setOnClickListener { toggleObserveLoop() }
@@ -156,7 +167,7 @@ class MainActivity : Activity() {
         loopActions.addView(Button(this).apply {
             text = "Observe Now"
             isAllCaps = false
-            layoutParams = LinearLayout.LayoutParams(0, 42.dp(), 1f)
+            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f)
             setOnClickListener { observeAndAct(false) }
         })
         automationPanel.addView(loopActions)
@@ -172,8 +183,8 @@ class MainActivity : Activity() {
 
         status = TextView(this).apply {
             text = "Loop Browser • local prototype"
-            setPadding(10.dp(), 4.dp(), 10.dp(), 6.dp())
-            textSize = 12f
+            setPadding(8.dp(), 2.dp(), 8.dp(), 2.dp())
+            textSize = 11f
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
