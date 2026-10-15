@@ -32,6 +32,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var selectorInput: EditText
     private lateinit var loopButton: Button
+    private lateinit var desktopButton: Button
+    private var desktopMode = false
     private val loopHandler = Handler(Looper.getMainLooper())
     private var loopRunning = false
     private var loopStep = 0
@@ -107,6 +109,21 @@ class MainActivity : Activity() {
         addAction("Reload") { browser.reload() }
         addAction("Capture") { captureViewport() }
         root.addView(actions)
+
+        val displayRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(8.dp(), 0, 8.dp(), 4.dp())
+        }
+        desktopButton = Button(this).apply {
+            text = "Desktop mode: Off"
+            isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 42.dp()
+            )
+            setOnClickListener { toggleDesktopMode() }
+        }
+        displayRow.addView(desktopButton)
+        root.addView(displayRow)
 
         val automationPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -203,6 +220,23 @@ class MainActivity : Activity() {
                 status.text = "Ready • " + url.orEmpty()
             }
         }
+    }
+
+    private fun toggleDesktopMode() {
+        desktopMode = !desktopMode
+        browser.settings.apply {
+            useWideViewPort = desktopMode
+            loadWithOverviewMode = desktopMode
+            userAgentString = if (desktopMode) {
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            } else {
+                WebView(this@MainActivity).settings.userAgentString
+            }
+        }
+        desktopButton.text = if (desktopMode) "Desktop mode: On" else "Desktop mode: Off"
+        val currentUrl = browser.url ?: address.text.toString()
+        if (currentUrl.isNotBlank()) browser.loadUrl(currentUrl)
+        status.text = if (desktopMode) "Desktop mode enabled • reloading page" else "Mobile mode enabled • reloading page"
     }
 
     private fun toggleObserveLoop() {
