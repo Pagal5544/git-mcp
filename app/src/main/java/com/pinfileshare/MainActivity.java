@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -14,6 +15,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,6 +33,12 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Random;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.MultiFormatWriter;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
+
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -166,6 +174,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == IntentIntegrator.REQUEST_CODE) {
+            IntentResult scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+            if (scan != null && scan.getContents() != null) {
+                connectFromQr(scan.getContents());
+            }
+            return;
+        }
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (requestCode == PICK_FILE) {
@@ -180,6 +195,73 @@ public class MainActivity extends Activity {
             Uri destination = uri;
             io.execute(() -> downloadTo(destination));
         }
+    }
+
+    private void startQrScan() {
+        new IntentIntegrator(this)
+            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+            .setPrompt("Scan the sender's PIN File Share QR")
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+            .initiateScan();
+    }
+
+    private void connectFromQr(String content) {
+        try {
+            Uri parsed = Uri.parse(content);
+            String scheme = parsed.getScheme();
+            String host = parsed.getHost();
+            String ip = parsed.getQueryParameter("ip");
+            String scannedPin = parsed.getQueryParameter("pin");
+            if (scheme == null || !scheme.equalsIgnoreCase("pfs")
+                    || host == null || !host.equalsIgnoreCase("connect")
+                    || ip == null || !ip.matches("\\d{1,3}(\\.\\d{1,3}){3}")
+                    || scannedPin == null || !scannedPin.matches("\\d{6}")) {
+                throw new IllegalArgumentException("This is not a valid PIN File Share QR code.");
+            }
+            receiveIp = ip;
+            receivePin = scannedPin;
+            Toast.makeText(this, "QR scanned. Checking sender…", Toast.LENGTH_SHORT).show();
+            io.execute(this::checkSender);
+        } catch (Exception e) {
+            Toast.makeText(this, "Invalid QR code: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private Bitmap makeQrBitmap(String content) throws Exception {
+        BitMatrix matrix = new MultiFormatWriter().encode(content, BarcodeFormat.QR_CODE, 640, 640);
+        Bitmap bitmap = Bitmap.createBitmap(matrix.getWidth(), matrix.getHeight(), Bitmap.Config.ARGB_8888);
+        for (int y = 0; y < matrix.getHeight(); y++) {
+            for (int x = 0; x < matrix.getWidth(); x++) {
+                bitmap.setPixel(x, y, matrix.get(x, y) ? Color.BLACK : Color.WHITE);
+            }
+        }
+        return bitmap;
+    }
+
+    private LinearLayout makeSharePreview(String ip) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(8), dp(20), dp(8));
+        panel.addView(text("File: " + selectedName, 16, Color.rgb(22, 34, 53)));
+        panel.addView(text("Size: " + readableSize(selectedSize), 14, Color.rgb(92, 105, 123)));
+        panel.addView(text("Sender IP: " + ip + "   Port: " + PORT, 13, Color.rgb(92, 105, 123)));
+        panel.addView(text("PIN: " + pin, 24, Color.rgb(22, 52, 92)));
+        addGap(panel, 8);
+        ImageView qr = new ImageView(this);
+        qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        try {
+            String payload = "PFS://connect?ip=" + ip + "&pin=" + pin;
+            qr.setImageBitmap(makeQrBitmap(payload));
+            panel.addView(qr, new LinearLayout.LayoutParams(dp(236), dp(236)));
+            TextView note = text("On the receiving phone, tap “Scan sender QR”. Both phones must be on the same trusted Wi-Fi. QR contains the local IP and temporary PIN.", 13, Color.rgb(92, 105, 123));
+            panel.addView(note);
+        } catch (Exception e) {
+            panel.addView(text("QR generation failed. Use the IP and PIN above.", 13, Color.RED));
+        }
+        addGap(panel, 6);
+        panel.addView(text("PIN expires in 10 minutes and allows one download. Local MVP traffic is not encrypted.", 12, Color.rgb(130, 70, 45)));
+        return panel;
     }
 
     private String queryName(Uri uri) {
@@ -211,11 +293,14 @@ public class MainActivity extends Activity {
         serverRunning = true;
         io.execute(this::serveLoop);
         String ip = localWifiIp();
+        if (ip.startsWith("Unavailable")) {
+            stopServer();
+            Toast.makeText(this, "Connect to Wi-Fi before sharing.", Toast.LENGTH_LONG).show();
+            return;
+        }
         new AlertDialog.Builder(this)
             .setTitle("File ready to share")
-            .setMessage("File: " + selectedName + "\nSize: " + readableSize(selectedSize)
-                + "\n\nSender IP: " + ip + "\nPort: " + PORT + "\nPIN: " + pin
-                + "\n\nKeep both phones on the same trusted Wi-Fi. PIN expires in 10 minutes and allows one download. This local MVP does not encrypt traffic.")
+            .setView(makeSharePreview(ip))
             .setPositiveButton("Keep sharing", (d, w) -> { })
             .setNegativeButton("Stop sharing", (d, w) -> stopServer())
             .setOnCancelListener(d -> stopServer())
@@ -340,8 +425,15 @@ public class MainActivity extends Activity {
         pinInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         form.addView(ip);
         form.addView(pinInput);
-        new AlertDialog.Builder(this).setTitle("Connect to sender").setMessage("Both phones must use the same trusted Wi-Fi network.")
-            .setView(form).setNegativeButton("Cancel", null)
+        new AlertDialog.Builder(this)
+            .setTitle("Connect to sender")
+            .setMessage("Scan the sender's QR code to fill the IP and PIN automatically, or enter them manually. Both phones must use the same trusted Wi-Fi.")
+            .setView(form)
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Scan sender QR", (dialog, which) -> {
+                dialog.dismiss();
+                startQrScan();
+            })
             .setPositiveButton("Check PIN", (d, w) -> {
                 receiveIp = ip.getText().toString().trim();
                 receivePin = pinInput.getText().toString().trim();
