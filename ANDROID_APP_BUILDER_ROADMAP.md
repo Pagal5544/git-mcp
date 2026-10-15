@@ -116,8 +116,9 @@ Do not promise that a PIN alone can connect two phones over every network. Choos
 - [x] Add the initial Send/Receive UI and Android GitHub Actions build workflow.
 - [x] Fix Android SDK package installation in the workflow and obtain a successful `assembleDebug` build.
 - [x] Verify successful upload of the `android-debug-apk` artifact (ID `11945014071`).
-- [ ] Download the artifact ZIP, extract the APK, and install it on a supported Android device.
-- [ ] Test the current UI on-device and fix any install/runtime issues.
+- [x] Download the artifact ZIP, extract the APK, install it on the user's Android phone, and launch it successfully (user-provided screenshot, 2026-10-15).
+- [x] Visually verify the initial Send/Receive home screen on-device; both buttons and the prototype notice are displayed.
+- [ ] Test file picker interaction on-device and address any install/runtime issues.
 - [ ] Design the actual PIN pairing and transfer architecture, including same-network vs cross-network behavior.
 - [ ] Implement expiring PINs, rate limiting, receiver consent, encrypted transport, integrity/hash verification, progress, cancellation, and error handling.
 - [ ] Test a real file transfer between two phones, including invalid/expired PINs and interrupted transfers.
@@ -136,13 +137,13 @@ Do not promise that a PIN alone can connect two phones over every network. Choos
 
 ### Not yet completed
 
-- [ ] Download/extract and install APK on a phone.
+- [x] APK installed and app launched on a real Android phone; initial UI confirmed from user screenshot (2026-10-15).
 - [ ] Implement PIN creation, expiry, validation, and phone-to-phone pairing.
 - [ ] Implement actual transfer transport and receiving/saving files.
 - [ ] Add receiver confirmation, encryption, integrity verification, and transfer-state/error handling.
 - [ ] Test end-to-end transfer between two phones.
 
-The current successful build proves the project compiles and the artifact uploads; it does **not** prove installation or file-transfer functionality.
+The successful build and artifact upload are verified, and the user has confirmed the APK installs and launches on an Android phone. This verifies the initial UI only; it does **not** prove PIN pairing or file-transfer functionality.
 
 ## 9. Definition of done
 
