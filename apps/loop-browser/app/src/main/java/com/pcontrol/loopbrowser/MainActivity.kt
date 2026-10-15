@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var loopButton: Button
     private lateinit var desktopButton: Button
     private var desktopMode = false
+    private var mobileUserAgent: String = ""
     private val loopHandler = Handler(Looper.getMainLooper())
     private var loopRunning = false
     private var loopStep = 0
@@ -211,6 +212,7 @@ class MainActivity : Activity() {
                 progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
             }
         }
+        mobileUserAgent = browser.settings.userAgentString
         browser.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView?, request: WebResourceRequest?
@@ -230,7 +232,7 @@ class MainActivity : Activity() {
             userAgentString = if (desktopMode) {
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             } else {
-                WebView(this@MainActivity).settings.userAgentString
+                mobileUserAgent
             }
         }
         desktopButton.text = if (desktopMode) "Desktop mode: On" else "Desktop mode: Off"
