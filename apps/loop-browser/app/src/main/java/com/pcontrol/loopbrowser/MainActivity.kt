@@ -247,10 +247,13 @@ class MainActivity : Activity() {
             visibility = View.GONE
             alpha = 0.92f
             layoutParams = android.widget.FrameLayout.LayoutParams(
-                44.dp(), 44.dp(), android.view.Gravity.TOP or android.view.Gravity.END
+                ViewGroup.LayoutParams.MATCH_PARENT, 34.dp(), android.view.Gravity.TOP
             ).apply {
-                topMargin = 8.dp()
-                marginEnd = 8.dp()
+                topMargin = 0
+            }
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xE6E3E7EE.toInt())
+                cornerRadius = 0f
             }
             setOnClickListener { setControlStripHidden(!stripHidden) }
         }
@@ -304,6 +307,8 @@ class MainActivity : Activity() {
         stripToggleButton.visibility = if (fullscreenMode) View.VISIBLE else View.GONE
         stripToggleButton.text = if (hidden) "☰" else "×"
         stripToggleButton.contentDescription = if (hidden) "Show browser controls" else "Hide browser controls"
+        stripToggleButton.gravity = android.view.Gravity.CENTER_VERTICAL or if (hidden) android.view.Gravity.END else android.view.Gravity.START
+        stripToggleButton.setPadding(if (hidden) 0 else 12.dp(), 0, if (hidden) 12.dp() else 0, 0)
     }
 
     private fun toggleFullscreen() {
