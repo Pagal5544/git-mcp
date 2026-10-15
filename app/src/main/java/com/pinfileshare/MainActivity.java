@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
     private static final int SAVE_FILE = 42;
     private static final int PORT = 8765;
     private static final int REQUEST_WIFI_DIRECT = 600;
+    private static final int REQUEST_CAMERA_SCAN = 601;
     private WifiP2pManager p2pManager;
     private WifiP2pManager.Channel p2pChannel;
     private BroadcastReceiver p2pReceiver;
@@ -219,12 +220,20 @@ public class MainActivity extends Activity {
     }
 
     private void startQrScan() {
-        new IntentIntegrator(this)
-            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-            .setPrompt("Scan the sender's PIN File Share QR")
-            .setBeepEnabled(false)
-            .setOrientationLocked(false)
-            .initiateScan();
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_SCAN);
+            return;
+        }
+        try {
+            new IntentIntegrator(this)
+                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                .setPrompt("Scan the sender's PIN File Share QR")
+                .setBeepEnabled(false)
+                .setOrientationLocked(false)
+                .initiateScan();
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not open QR scanner: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private void connectFromQr(String content) {
@@ -325,6 +334,14 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CAMERA_SCAN) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startQrScan();
+            } else {
+                Toast.makeText(this, "Camera permission is required to scan QR codes.", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != REQUEST_WIFI_DIRECT) return;
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             if (connectionPending) {
@@ -393,17 +410,62 @@ public class MainActivity extends Activity {
                         .setOnCancelListener(d -> stopServer()).show());
                 }
                 @Override public void onFailure(int secondReason) {
-                    stopServer();
-                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("Wi-Fi Direct unavailable")
-                        .setMessage("Android rejected group creation (code " + secondReason + "; first attempt " + firstReason + "). Check system Wi-Fi Direct state, disconnect other Wi-Fi Direct sessions, and try again.")
-                        .setPositiveButton("OK", null).show());
+                    offerLanFallback(firstReason, secondReason);
                 }
             });
         } catch (Exception e) {
             stopServer();
             Toast.makeText(this, "Wi-Fi Direct retry failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void offerLanFallback(int firstReason, int secondReason) {
+        p2pShareRequested = false;
+        String ip = localWifiIp();
+        boolean lanAvailable = ip != null && !ip.startsWith("Unavailable");
+        runOnUiThread(() -> {
+            AlertDialog.Builder dialog = new AlertDialog.Builder(MainActivity.this)
+                .setTitle("Wi-Fi Direct unavailable")
+                .setMessage("Android refused Wi-Fi Direct (codes " + firstReason + " / " + secondReason + "). "
+                    + (lanAvailable
+                        ? "You can continue with same-Wi-Fi QR sharing instead."
+                        : "Connect both phones to the same Wi-Fi network for fallback sharing."));
+            if (lanAvailable) dialog.setPositiveButton("Use same Wi-Fi", (d, w) -> showLanShare(ip));
+            dialog.setNegativeButton("Stop sharing", (d, w) -> stopServer());
+            dialog.show();
+        });
+    }
+
+    private void showLanShare(String ip) {
+        new AlertDialog.Builder(this)
+            .setTitle("Share over same Wi-Fi")
+            .setView(makeLanSharePreview(ip))
+            .setMessage("Both phones must be on the same reachable Wi-Fi. Receiver scans the QR; IP and PIN fill automatically.")
+            .setPositiveButton("Keep sharing", (d, w) -> { })
+            .setNegativeButton("Stop sharing", (d, w) -> stopServer())
+            .setOnCancelListener(d -> stopServer())
+            .show();
+    }
+
+    private LinearLayout makeLanSharePreview(String ip) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(8), dp(20), dp(8));
+        panel.addView(text("File: " + selectedName, 16, Color.rgb(22, 34, 53)));
+        panel.addView(text("Size: " + readableSize(selectedSize), 14, Color.rgb(92, 105, 123)));
+        panel.addView(text("IP: " + ip + "   Port: " + PORT, 13, Color.rgb(92, 105, 123)));
+        panel.addView(text("PIN: " + pin, 24, Color.rgb(22, 52, 92)));
+        addGap(panel, 8);
+        ImageView qr = new ImageView(this);
+        qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        try {
+            qr.setImageBitmap(makeQrBitmap("PFS://connect?ip=" + ip + "&pin=" + pin));
+            panel.addView(qr, new LinearLayout.LayoutParams(dp(236), dp(236)));
+        } catch (Exception e) {
+            panel.addView(text("QR generation failed. Use the IP and PIN above.", 13, Color.RED));
+        }
+        panel.addView(text("PIN expires in 10 minutes. Prototype traffic is not encrypted.", 12, Color.rgb(130, 140, 153)));
+        return panel;
     }
 
     private void connectWifiDirect() {
