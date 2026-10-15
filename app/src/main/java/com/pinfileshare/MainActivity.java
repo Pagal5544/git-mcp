@@ -348,7 +348,7 @@ public class MainActivity extends Activity {
                 connectionPending = false;
                 connectWifiDirectNow();
             } else if (p2pShareRequested) {
-                startWifiDirectGroupNow();
+                discoverForDirectShare();
             }
         } else {
             connectionPending = false;
