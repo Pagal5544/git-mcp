@@ -2,6 +2,17 @@ package com.pinfileshare;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.Manifest;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.net.NetworkInfo;
+import android.net.wifi.p2p.WifiP2pConfig;
+import android.net.wifi.p2p.WifiP2pDevice;
+import android.net.wifi.p2p.WifiP2pInfo;
+import android.net.wifi.p2p.WifiP2pManager;
+import android.os.Build;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -31,6 +42,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import com.google.zxing.BarcodeFormat;
@@ -46,6 +59,13 @@ public class MainActivity extends Activity {
     private static final int PICK_FILE = 41;
     private static final int SAVE_FILE = 42;
     private static final int PORT = 8765;
+    private static final int REQUEST_WIFI_DIRECT = 600;
+    private WifiP2pManager p2pManager;
+    private WifiP2pManager.Channel p2pChannel;
+    private BroadcastReceiver p2pReceiver;
+    private boolean p2pReceiverRegistered;
+    private volatile boolean p2pShareRequested;
+    private volatile boolean connectionPending;
     private final ExecutorService io = Executors.newCachedThreadPool();
     private Uri selectedUri;
     private String selectedName = "shared-file";
@@ -72,6 +92,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(Color.rgb(247, 249, 252));
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        initWifiDirect();
         showHome();
     }
 
@@ -117,7 +138,7 @@ public class MainActivity extends Activity {
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(title);
         addGap(root, 10);
-        root.addView(text("Transfer a file between phones on the same Wi-Fi network.", 16,
+        root.addView(text("Send files directly between nearby phones using Wi-Fi Direct and QR pairing.", 16,
             Color.rgb(92, 105, 123)));
         addGap(root, 30);
 
@@ -140,16 +161,16 @@ public class MainActivity extends Activity {
         addGap(receiveCard, 8);
         receiveCard.addView(text("Connect to sender", 20, Color.rgb(22, 34, 53)));
         addGap(receiveCard, 6);
-        receiveCard.addView(text("Enter the sender's local IP address and PIN.", 14,
+        receiveCard.addView(text("Scan the sender QR to pair directly. No router or manual IP needed.", 14,
             Color.rgb(92, 105, 123)));
         addGap(receiveCard, 18);
-        Button receive = button("Enter sender details", Color.rgb(226, 234, 246), Color.rgb(22, 52, 92));
+        Button receive = button("Scan sender QR", Color.rgb(226, 234, 246), Color.rgb(22, 52, 92));
         receive.setOnClickListener(v -> showReceiveForm());
         receiveCard.addView(receive);
         root.addView(receiveCard);
 
         addGap(root, 22);
-        TextView note = text("LOCAL WI-FI MVP • PIN EXPIRES IN 10 MINUTES", 11,
+        TextView note = text("WI-FI DIRECT • PIN EXPIRES IN 10 MINUTES", 11,
             Color.rgb(130, 140, 153));
         note.setGravity(Gravity.CENTER);
         root.addView(note);
@@ -211,18 +232,16 @@ public class MainActivity extends Activity {
             Uri parsed = Uri.parse(content);
             String scheme = parsed.getScheme();
             String host = parsed.getHost();
-            String ip = parsed.getQueryParameter("ip");
             String scannedPin = parsed.getQueryParameter("pin");
             if (scheme == null || !scheme.equalsIgnoreCase("pfs")
-                    || host == null || !host.equalsIgnoreCase("connect")
-                    || ip == null || !ip.matches("\\d{1,3}(\\.\\d{1,3}){3}")
+                    || host == null || !host.equalsIgnoreCase("direct")
                     || scannedPin == null || !scannedPin.matches("\\d{6}")) {
-                throw new IllegalArgumentException("This is not a valid PIN File Share QR code.");
+                throw new IllegalArgumentException("This is not a valid PIN File Share Wi-Fi Direct QR.");
             }
-            receiveIp = ip;
+            receiveIp = null;
             receivePin = scannedPin;
-            Toast.makeText(this, "QR scanned. Checking sender…", Toast.LENGTH_SHORT).show();
-            io.execute(this::checkSender);
+            Toast.makeText(this, "QR scanned. Discovering nearby phones…", Toast.LENGTH_LONG).show();
+            connectWifiDirect();
         } catch (Exception e) {
             Toast.makeText(this, "Invalid QR code: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
@@ -239,29 +258,206 @@ public class MainActivity extends Activity {
         return bitmap;
     }
 
-    private LinearLayout makeSharePreview(String ip) {
+    private LinearLayout makeSharePreview() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(20), dp(8), dp(20), dp(8));
         panel.addView(text("File: " + selectedName, 16, Color.rgb(22, 34, 53)));
         panel.addView(text("Size: " + readableSize(selectedSize), 14, Color.rgb(92, 105, 123)));
-        panel.addView(text("Sender IP: " + ip + "   Port: " + PORT, 13, Color.rgb(92, 105, 123)));
         panel.addView(text("PIN: " + pin, 24, Color.rgb(22, 52, 92)));
         addGap(panel, 8);
         ImageView qr = new ImageView(this);
         qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
         try {
-            String payload = "PFS://connect?ip=" + ip + "&pin=" + pin;
-            qr.setImageBitmap(makeQrBitmap(payload));
+            qr.setImageBitmap(makeQrBitmap("PFS://direct?pin=" + pin));
             panel.addView(qr, new LinearLayout.LayoutParams(dp(236), dp(236)));
-            TextView note = text("On the receiving phone, tap “Scan sender QR”. Both phones must be on the same trusted Wi-Fi. QR contains the local IP and temporary PIN.", 13, Color.rgb(92, 105, 123));
-            panel.addView(note);
+            panel.addView(text("Receiver: tap “Scan sender QR” and select this phone from nearby devices. Android may show a connection prompt.", 13, Color.rgb(92, 105, 123)));
         } catch (Exception e) {
-            panel.addView(text("QR generation failed. Use the IP and PIN above.", 13, Color.RED));
+            panel.addView(text("QR generation failed. Stop sharing and try again.", 13, Color.RED));
         }
         addGap(panel, 6);
-        panel.addView(text("PIN expires in 10 minutes and allows one download. Local MVP traffic is not encrypted.", 12, Color.rgb(130, 70, 45)));
+        panel.addView(text("PIN expires in 10 minutes; one download only. Prototype traffic is not end-to-end encrypted.", 12, Color.rgb(130, 70, 45)));
         return panel;
+    }
+
+    private void initWifiDirect() {
+        p2pManager = (WifiP2pManager) getSystemService(Context.WIFI_P2P_SERVICE);
+        if (p2pManager == null) return;
+        p2pChannel = p2pManager.initialize(this, getMainLooper(), () ->
+            runOnUiThread(() -> Toast.makeText(this, "Wi-Fi Direct channel disconnected. Reopen the app.", Toast.LENGTH_LONG).show()));
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
+        filter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
+        p2pReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                if (WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION.equals(action)) {
+                    NetworkInfo network = intent.getParcelableExtra(WifiP2pManager.EXTRA_NETWORK_INFO);
+                    if (network != null && network.isConnected()) {
+                        p2pManager.requestConnectionInfo(p2pChannel, MainActivity.this::handleP2pConnectionInfo);
+                    }
+                } else if (WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION.equals(action)) {
+                    int state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1);
+                    if (state != WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Please enable Wi-Fi to use Wi-Fi Direct.", Toast.LENGTH_LONG).show());
+                    }
+                }
+            }
+        };
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(p2pReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(p2pReceiver, filter);
+        p2pReceiverRegistered = true;
+    }
+
+    private boolean hasWifiDirectPermission() {
+        // targetSdk 28 needs location permission for Wi-Fi P2P on current Android versions.
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void ensureWifiDirectPermission(Runnable allowed) {
+        if (hasWifiDirectPermission()) {
+            allowed.run();
+        } else {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_WIFI_DIRECT);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_WIFI_DIRECT) return;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (connectionPending) {
+                connectionPending = false;
+                connectWifiDirectNow();
+            } else if (p2pShareRequested) {
+                startWifiDirectGroupNow();
+            }
+        } else {
+            connectionPending = false;
+            p2pShareRequested = false;
+            Toast.makeText(this, "Location/nearby permission is required by Android for Wi-Fi Direct discovery.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void startWifiDirectGroup() {
+        ensureWifiDirectPermission(this::startWifiDirectGroupNow);
+    }
+
+    private void startWifiDirectGroupNow() {
+        if (p2pManager == null || p2pChannel == null) {
+            stopServer();
+            Toast.makeText(this, "This phone does not expose Wi-Fi Direct.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            p2pManager.createGroup(p2pChannel, new WifiP2pManager.ActionListener() {
+                @Override public void onSuccess() {
+                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Direct share ready")
+                        .setView(makeSharePreview())
+                        .setMessage("Wi-Fi Direct group created. On the other phone, tap Scan sender QR and choose this phone from the nearby device list.")
+                        .setPositiveButton("Keep sharing", (d, w) -> { })
+                        .setNegativeButton("Stop sharing", (d, w) -> stopServer())
+                        .setOnCancelListener(d -> stopServer()).show());
+                }
+                @Override public void onFailure(int reason) {
+                    stopServer();
+                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Could not start direct sharing")
+                        .setMessage("Android could not create a Wi-Fi Direct group (code " + reason + "). Close any old transfer and try again.")
+                        .setPositiveButton("OK", null).show());
+                }
+            });
+        } catch (SecurityException e) {
+            stopServer();
+            Toast.makeText(this, "Allow location/nearby permission and try again.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void connectWifiDirect() {
+        connectionPending = true;
+        ensureWifiDirectPermission(this::connectWifiDirectNow);
+    }
+
+    private void connectWifiDirectNow() {
+        if (p2pManager == null || p2pChannel == null) {
+            connectionPending = false;
+            Toast.makeText(this, "This phone does not expose Wi-Fi Direct.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            p2pManager.discoverPeers(p2pChannel, new WifiP2pManager.ActionListener() {
+                @Override public void onSuccess() { waitForDirectPeers(0); }
+                @Override public void onFailure(int reason) {
+                    connectionPending = false;
+                    Toast.makeText(MainActivity.this, "Peer discovery failed (" + reason + "). Enable Wi-Fi and nearby permission.", Toast.LENGTH_LONG).show();
+                }
+            });
+        } catch (SecurityException e) {
+            connectionPending = false;
+            Toast.makeText(this, "Wi-Fi Direct permission is required.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void waitForDirectPeers(int attempt) {
+        if (!connectionPending || attempt >= 20) {
+            connectionPending = false;
+            Toast.makeText(this, "No nearby Wi-Fi Direct devices found. Keep the sender's share screen open and retry.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        p2pManager.requestPeers(p2pChannel, peers -> {
+            if (!connectionPending) return;
+            List<WifiP2pDevice> devices = new ArrayList<>();
+            for (WifiP2pDevice device : peers.getDeviceList()) {
+                if (device.status == WifiP2pDevice.AVAILABLE || device.status == WifiP2pDevice.INVITED) devices.add(device);
+            }
+            if (devices.isEmpty()) {
+                new android.os.Handler(getMainLooper()).postDelayed(() -> waitForDirectPeers(attempt + 1), 1000);
+                return;
+            }
+            String[] names = new String[devices.size()];
+            for (int i = 0; i < devices.size(); i++) {
+                String name = devices.get(i).deviceName;
+                names[i] = (name == null || name.trim().isEmpty()) ? "Nearby device " + (i + 1) : name;
+            }
+            runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
+                .setTitle("Choose the sender's phone")
+                .setItems(names, (dialog, which) -> connectToDirectPeer(devices.get(which)))
+                .setOnCancelListener(dialog -> { connectionPending = false; })
+                .show());
+        });
+    }
+
+    private void connectToDirectPeer(WifiP2pDevice device) {
+        try {
+            WifiP2pConfig config = new WifiP2pConfig();
+            config.deviceAddress = device.deviceAddress;
+            config.wps.setup = android.net.wifi.p2p.WpsInfo.PBC;
+            p2pManager.connect(p2pChannel, config, new WifiP2pManager.ActionListener() {
+                @Override public void onSuccess() {
+                    Toast.makeText(MainActivity.this, "Pairing request sent. Accept any Android connection prompt.", Toast.LENGTH_LONG).show();
+                }
+                @Override public void onFailure(int reason) {
+                    connectionPending = false;
+                    Toast.makeText(MainActivity.this, "Wi-Fi Direct pairing failed (" + reason + ").", Toast.LENGTH_LONG).show();
+                }
+            });
+        } catch (SecurityException e) {
+            connectionPending = false;
+            Toast.makeText(this, "Wi-Fi Direct permission was denied.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void handleP2pConnectionInfo(WifiP2pInfo info) {
+        if (info == null || !info.groupFormed || info.groupOwnerAddress == null) return;
+        // The group owner runs the server; the client connects to the owner's address.
+        if (!info.isGroupOwner && receivePin != null) {
+            receiveIp = info.groupOwnerAddress.getHostAddress();
+            connectionPending = false;
+            Toast.makeText(this, "Direct connection ready. Checking PIN…", Toast.LENGTH_LONG).show();
+            io.execute(this::checkSender);
+        }
     }
 
     private String queryName(Uri uri) {
@@ -291,20 +487,9 @@ public class MainActivity extends Activity {
         failedPins = 0;
         transferUsed = false;
         serverRunning = true;
+        p2pShareRequested = true;
         io.execute(this::serveLoop);
-        String ip = localWifiIp();
-        if (ip.startsWith("Unavailable")) {
-            stopServer();
-            Toast.makeText(this, "Connect to Wi-Fi before sharing.", Toast.LENGTH_LONG).show();
-            return;
-        }
-        new AlertDialog.Builder(this)
-            .setTitle("File ready to share")
-            .setView(makeSharePreview(ip))
-            .setPositiveButton("Keep sharing", (d, w) -> { })
-            .setNegativeButton("Stop sharing", (d, w) -> stopServer())
-            .setOnCancelListener(d -> stopServer())
-            .show();
+        startWifiDirectGroup();
     }
 
     private String localWifiIp() {
@@ -427,7 +612,7 @@ public class MainActivity extends Activity {
         form.addView(pinInput);
         new AlertDialog.Builder(this)
             .setTitle("Connect to sender")
-            .setMessage("Scan the sender's QR code to fill the IP and PIN automatically, or enter them manually. Both phones must use the same trusted Wi-Fi.")
+            .setMessage("Scan the sender's QR to pair over Wi-Fi Direct. Android may ask you to accept the connection.")
             .setView(form)
             .setNegativeButton("Cancel", null)
             .setNeutralButton("Scan sender QR", (dialog, which) -> {
@@ -543,6 +728,7 @@ public class MainActivity extends Activity {
 
     private void stopServer() {
         serverRunning = false;
+        p2pShareRequested = false;
         if (serverSocket != null) {
             try { serverSocket.close(); } catch (Exception ignored) { }
             serverSocket = null;
@@ -552,6 +738,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopServer();
+        if (p2pReceiverRegistered && p2pReceiver != null) {
+            try { unregisterReceiver(p2pReceiver); } catch (Exception ignored) { }
+            p2pReceiverRegistered = false;
+        }
         io.shutdownNow();
         super.onDestroy();
     }
