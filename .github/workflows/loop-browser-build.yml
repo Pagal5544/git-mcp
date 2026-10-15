@@ -1,0 +1,59 @@
+name: Loop Browser Android APK Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feat/loop-browser-android"
+    paths:
+      - "apps/loop-browser/**"
+      - ".github/workflows/loop-browser-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loop-browser-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Loop Browser debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/loop-browser
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+        working-directory: .
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+          cache-disabled: true
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload Loop Browser APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-browser-debug-apk
+          path: apps/loop-browser/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
