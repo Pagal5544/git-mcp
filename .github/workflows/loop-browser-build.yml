@@ -21,9 +21,6 @@ jobs:
     name: Build Loop Browser debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: apps/loop-browser
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,7 +36,6 @@ jobs:
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
-        working-directory: .
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -48,6 +44,7 @@ jobs:
           cache-disabled: true
 
       - name: Build debug APK
+        working-directory: apps/loop-browser
         run: gradle --no-daemon assembleDebug
 
       - name: Upload Loop Browser APK
