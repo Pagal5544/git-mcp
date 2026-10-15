@@ -235,7 +235,6 @@ class MainActivity : Activity() {
         root.isFocusableInTouchMode = true
         root.requestFocus()
         address.clearFocus()
-        address.showSoftInputOnFocus = false
 
         address.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO) {
