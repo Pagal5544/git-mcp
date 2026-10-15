@@ -252,7 +252,7 @@ class MainActivity : Activity() {
                 topMargin = 8.dp()
                 marginEnd = 8.dp()
             }
-            setOnClickListener { setControlStripHidden(false) }
+            setOnClickListener { setControlStripHidden(!stripHidden) }
         }
         browserFrame.addView(stripToggleButton)
         root.addView(browserFrame)
@@ -301,7 +301,9 @@ class MainActivity : Activity() {
     private fun setControlStripHidden(hidden: Boolean) {
         stripHidden = hidden
         displayRow.visibility = if (hidden) View.GONE else View.VISIBLE
-        stripToggleButton.visibility = if (hidden && fullscreenMode) View.VISIBLE else View.GONE
+        stripToggleButton.visibility = if (fullscreenMode) View.VISIBLE else View.GONE
+        stripToggleButton.text = if (hidden) "☰" else "×"
+        stripToggleButton.contentDescription = if (hidden) "Show browser controls" else "Hide browser controls"
     }
 
     private fun toggleFullscreen() {
@@ -314,8 +316,11 @@ class MainActivity : Activity() {
             if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         progress.visibility = if (fullscreenMode) View.GONE else progress.visibility
         fullscreenButton.text = if (fullscreenMode) "Exit full" else "Full"
-        if (!fullscreenMode) setControlStripHidden(false)
-        else setControlStripHidden(stripHidden)
+        if (!fullscreenMode) {
+            setControlStripHidden(false)
+        } else {
+            setControlStripHidden(true)
+        }
         displayRow.setBackgroundColor(if (fullscreenMode) 0xFFE3E7EE.toInt() else 0xFFF5F7FB.toInt())
         if (fullscreenMode) {
             address.clearFocus()
