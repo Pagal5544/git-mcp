@@ -280,7 +280,7 @@ public class MainActivity extends Activity {
         try {
             qr.setImageBitmap(makeQrBitmap("PFS://direct?pin=" + pin));
             panel.addView(qr, new LinearLayout.LayoutParams(dp(236), dp(236)));
-            panel.addView(text("Receiver: tap “Scan sender QR” and select this phone from nearby devices. Android may show a connection prompt.", 13, Color.rgb(92, 105, 123)));
+            panel.addView(text("Receiver: tap “Scan sender QR”, then choose this phone from nearby devices. No third hotspot or router is required for Wi-Fi Direct.", 13, Color.rgb(92, 105, 123)));
         } catch (Exception e) {
             panel.addView(text("QR generation failed. Stop sharing and try again.", 13, Color.RED));
         }
@@ -358,65 +358,34 @@ public class MainActivity extends Activity {
     }
 
     private void startWifiDirectGroup() {
-        ensureWifiDirectPermission(this::startWifiDirectGroupNow);
+        ensureWifiDirectPermission(this::discoverForDirectShare);
     }
 
-    private void startWifiDirectGroupNow() {
+    private void discoverForDirectShare() {
         if (p2pManager == null || p2pChannel == null) {
-            stopServer();
-            Toast.makeText(this, "This phone does not expose Wi-Fi Direct.", Toast.LENGTH_LONG).show();
+            offerLanFallback(-1, -1);
             return;
         }
-        try {
-            p2pManager.createGroup(p2pChannel, new WifiP2pManager.ActionListener() {
-                @Override public void onSuccess() {
-                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("Direct share ready")
-                        .setView(makeSharePreview())
-                        .setMessage("Wi-Fi Direct group created. On the other phone, tap Scan sender QR and choose this phone from the nearby device list.")
-                        .setPositiveButton("Keep sharing", (d, w) -> { })
-                        .setNegativeButton("Stop sharing", (d, w) -> stopServer())
-                        .setOnCancelListener(d -> stopServer()).show());
-                }
-                @Override public void onFailure(int reason) {
-                    // On some Android builds a group may already exist or createGroup is restricted.
-                    // Try discovery first and provide a clear diagnostic if the vendor refuses it again.
-                    try {
-                        p2pManager.removeGroup(p2pChannel, new WifiP2pManager.ActionListener() {
-                            @Override public void onSuccess() { retryCreateGroup(reason); }
-                            @Override public void onFailure(int removeReason) { retryCreateGroup(reason); }
-                        });
-                    } catch (Exception ignored) {
-                        retryCreateGroup(reason);
+        ensureWifiDirectPermission(() -> {
+            try {
+                p2pManager.discoverPeers(p2pChannel, new WifiP2pManager.ActionListener() {
+                    @Override public void onSuccess() {
+                        runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Ready to pair directly")
+                            .setView(makeSharePreview())
+                            .setMessage("Leave this screen open. On the receiving phone, scan this QR and choose this phone from the nearby-device list. Android will form the direct connection.")
+                            .setPositiveButton("Keep sharing", (d, w) -> { })
+                            .setNegativeButton("Stop sharing", (d, w) -> stopServer())
+                            .setOnCancelListener(d -> stopServer()).show());
                     }
-                }
-            });
-        } catch (SecurityException e) {
-            stopServer();
-            Toast.makeText(this, "Allow location/nearby permission and try again.", Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void retryCreateGroup(int firstReason) {
-        try {
-            p2pManager.createGroup(p2pChannel, new WifiP2pManager.ActionListener() {
-                @Override public void onSuccess() {
-                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("Direct share ready")
-                        .setView(makeSharePreview())
-                        .setMessage("Wi-Fi Direct group created. On the other phone, tap Scan sender QR and choose this phone from the nearby device list.")
-                        .setPositiveButton("Keep sharing", (d, w) -> { })
-                        .setNegativeButton("Stop sharing", (d, w) -> stopServer())
-                        .setOnCancelListener(d -> stopServer()).show());
-                }
-                @Override public void onFailure(int secondReason) {
-                    offerLanFallback(firstReason, secondReason);
-                }
-            });
-        } catch (Exception e) {
-            stopServer();
-            Toast.makeText(this, "Wi-Fi Direct retry failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
+                    @Override public void onFailure(int reason) {
+                        offerLanFallback(reason, reason);
+                    }
+                });
+            } catch (SecurityException e) {
+                offerLanFallback(-2, -2);
+            }
+        });
     }
 
     private void offerLanFallback(int firstReason, int secondReason) {
@@ -425,11 +394,11 @@ public class MainActivity extends Activity {
         boolean lanAvailable = ip != null && !ip.startsWith("Unavailable");
         runOnUiThread(() -> {
             AlertDialog.Builder dialog = new AlertDialog.Builder(MainActivity.this)
-                .setTitle("Wi-Fi Direct unavailable")
-                .setMessage("Android refused Wi-Fi Direct (codes " + firstReason + " / " + secondReason + "). "
+                .setTitle("Direct pairing unavailable")
+                .setMessage("Android could not start nearby Wi-Fi Direct discovery (codes " + firstReason + " / " + secondReason + "). "
                     + (lanAvailable
-                        ? "You can continue with same-Wi-Fi QR sharing instead."
-                        : "Connect both phones to the same Wi-Fi network for fallback sharing."));
+                        ? "You can still send over the current Wi-Fi connection."
+                        : "This phone needs Wi-Fi enabled to try direct pairing."));
             if (lanAvailable) dialog.setPositiveButton("Use same Wi-Fi", (d, w) -> showLanShare(ip));
             dialog.setNegativeButton("Stop sharing", (d, w) -> stopServer());
             dialog.show();
@@ -440,11 +409,10 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this)
             .setTitle("Share over same Wi-Fi")
             .setView(makeLanSharePreview(ip))
-            .setMessage("Both phones must be on the same reachable Wi-Fi. Receiver scans the QR; IP and PIN fill automatically.")
+            .setMessage("Both phones need to be on the same reachable Wi-Fi network. Scan the QR on the receiver.")
             .setPositiveButton("Keep sharing", (d, w) -> { })
             .setNegativeButton("Stop sharing", (d, w) -> stopServer())
-            .setOnCancelListener(d -> stopServer())
-            .show();
+            .setOnCancelListener(d -> stopServer()).show();
     }
 
     private LinearLayout makeLanSharePreview(String ip) {
@@ -462,7 +430,7 @@ public class MainActivity extends Activity {
             qr.setImageBitmap(makeQrBitmap("PFS://connect?ip=" + ip + "&pin=" + pin));
             panel.addView(qr, new LinearLayout.LayoutParams(dp(236), dp(236)));
         } catch (Exception e) {
-            panel.addView(text("QR generation failed. Use the IP and PIN above.", 13, Color.RED));
+            panel.addView(text("QR generation failed. Use the IP and PIN shown above.", 13, Color.RED));
         }
         panel.addView(text("PIN expires in 10 minutes. Prototype traffic is not encrypted.", 12, Color.rgb(130, 140, 153)));
         return panel;
@@ -582,7 +550,9 @@ public class MainActivity extends Activity {
         serverRunning = true;
         p2pShareRequested = true;
         io.execute(this::serveLoop);
-        startWifiDirectGroup();
+        // Do not force this phone to create a group. Let the receiver discover/connect;
+        // Android negotiates the group owner when both phones support Wi-Fi Direct.
+        discoverForDirectShare();
     }
 
     private String localWifiIp() {
