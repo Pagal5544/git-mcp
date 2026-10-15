@@ -320,7 +320,7 @@ class MainActivity : Activity() {
         status.visibility = if (fullscreenMode) View.GONE else
             if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         progress.visibility = if (fullscreenMode) View.GONE else progress.visibility
-        fullscreenButton.text = if (fullscreenMode) "Collapse" else "Expand"
+        fullscreenButton.text = if (fullscreenMode) "Expand" else "Collapse"
         if (!fullscreenMode) {
             setControlStripHidden(false)
         } else {
