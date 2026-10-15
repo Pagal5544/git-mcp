@@ -2,6 +2,7 @@ package com.pinfileshare;
 
 import androidx.activity.ComponentActivity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -20,6 +21,7 @@ import android.graphics.Bitmap;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Environment;
 import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
@@ -35,6 +37,8 @@ import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetAddress;
@@ -64,6 +68,8 @@ public class MainActivity extends ComponentActivity {
     private static final int PORT = 8765;
     private static final int REQUEST_WIFI_DIRECT = 600;
     private static final int REQUEST_CAMERA_SCAN = 601;
+    private static final int REQUEST_STORAGE_PERMISSION = 602;
+    private ProgressDialog transferDialog;
     private final ActivityResultLauncher<ScanOptions> qrScanner =
         registerForActivityResult(new ScanContract(), result -> {
             String scanned = result.getContents();
@@ -236,7 +242,7 @@ public class MainActivity extends ComponentActivity {
             options.setDesiredBarcodeFormats(ScanOptions.QR_CODE);
             options.setPrompt("Scan the sender's PIN File Share QR");
             options.setBeepEnabled(false);
-            options.setOrientationLocked(false);
+            options.setOrientationLocked(true);
             qrScanner.launch(options);
         } catch (android.content.ActivityNotFoundException e) {
             Toast.makeText(this, "QR scanner activity is unavailable. Reinstall the latest APK.", Toast.LENGTH_LONG).show();
@@ -345,6 +351,11 @@ public class MainActivity extends ComponentActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_STORAGE_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) downloadToDefaultFolder();
+            else Toast.makeText(this, "Storage permission is required to save in WiFi Pin Share.", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (requestCode == REQUEST_CAMERA_SCAN) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 startQrScan();
@@ -738,11 +749,120 @@ public class MainActivity extends ComponentActivity {
                 .setMessage("File: " + shownName + "\nSize: " + readableSize(shownSize)
                     + "\n\nOnly continue if you trust the sender and are on a trusted Wi-Fi network.")
                 .setNegativeButton("Decline", null)
-                .setPositiveButton("Choose save location", (dialog, which) -> chooseSaveLocation(shownName))
+                .setPositiveButton("Save to WiFi Pin Share", (dialog, which) -> requestDefaultFolderPermission())
                 .show());
         } catch (Exception e) {
             runOnUiThread(() -> Toast.makeText(this, "Connection failed: " + e.getMessage(),
                 Toast.LENGTH_LONG).show());
+        }
+    }
+
+    private void requestDefaultFolderPermission() {
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE_PERMISSION);
+        } else {
+            downloadToDefaultFolder();
+        }
+    }
+
+    private void downloadToDefaultFolder() {
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE_PERMISSION);
+            return;
+        }
+        io.execute(() -> {
+            try {
+                File folder = new File(Environment.getExternalStorageDirectory(), "WiFi Pin Share");
+                if (!folder.exists() && !folder.mkdirs()) throw new Exception("Could not create folder: " + folder.getAbsolutePath());
+                String name = expectedName == null ? "received-file" : expectedName.replaceAll("[/\\\\:*?\"<>|]", "_");
+                File target = new File(folder, name);
+                int i = 1;
+                while (target.exists()) {
+                    int dot = name.lastIndexOf('.');
+                    String base = dot > 0 ? name.substring(0, dot) : name;
+                    String ext = dot > 0 ? name.substring(dot) : "";
+                    target = new File(folder, base + " (" + i++ + ")" + ext);
+                }
+                downloadToFile(target);
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private void downloadToFile(File target) {
+        runOnUiThread(() -> {
+            transferDialog = new ProgressDialog(this);
+            transferDialog.setTitle("WiFi Pin Share");
+            transferDialog.setMessage("Connecting…");
+            transferDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+            transferDialog.setIndeterminate(true);
+            transferDialog.setCancelable(false);
+            transferDialog.show();
+        });
+        try (Socket s = new Socket()) {
+            s.connect(new java.net.InetSocketAddress(receiveIp, PORT), 5000);
+            s.setSoTimeout(15000);
+            OutputStream request = s.getOutputStream();
+            request.write(("GET /download?pin=" + receivePin + " HTTP/1.1\\r\\nHost: " + receiveIp + "\\r\\nConnection: close\\r\\n\\r\\n").getBytes(StandardCharsets.US_ASCII));
+            InputStream in = s.getInputStream();
+            ByteArrayOutputStream headers = new ByteArrayOutputStream();
+            int matched = 0;
+            while (headers.size() < 16384) {
+                int b = in.read();
+                if (b < 0) throw new Exception("Connection closed before transfer.");
+                headers.write(b);
+                if ((matched == 0 && b == 13) || (matched == 2 && b == 13)) matched++;
+                else if ((matched == 1 && b == 10) || (matched == 3 && b == 10)) matched++;
+                else matched = b == 13 ? 1 : 0;
+                if (matched == 4) break;
+            }
+            String headerText = headers.toString("US-ASCII");
+            if (!headerText.startsWith("HTTP/1.1 200")) throw new Exception("PIN expired, invalid, or already used.");
+            long length = -1;
+            for (String line : headerText.split("\\r\\n")) {
+                if (line.toLowerCase(Locale.US).startsWith("content-length:")) {
+                    try { length = Long.parseLong(line.substring(line.indexOf(':') + 1).trim()); } catch (Exception ignored) { }
+                }
+            }
+            long total = 0;
+            long lastUpdate = 0;
+            try (FileOutputStream out = new FileOutputStream(target)) {
+                byte[] buffer = new byte[32768];
+                int n;
+                while ((n = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, n);
+                    total += n;
+                    long now = System.currentTimeMillis();
+                    if (now - lastUpdate > 150) {
+                        final long received = total, expected = length;
+                        runOnUiThread(() -> {
+                            if (transferDialog == null) return;
+                            if (expected > 0) {
+                                transferDialog.setIndeterminate(false);
+                                transferDialog.setMax(1000);
+                                transferDialog.setProgress((int)Math.min(1000, received * 1000 / expected));
+                                transferDialog.setMessage(readableSize(received) + " / " + readableSize(expected) + " (" + (received * 100 / expected) + "%)");
+                            } else {
+                                transferDialog.setMessage("Received " + readableSize(received));
+                            }
+                        });
+                        lastUpdate = now;
+                    }
+                }
+            }
+            if (length >= 0 && total != length) throw new Exception("Incomplete transfer: " + readableSize(total) + " of " + readableSize(length));
+            final long done = total;
+            runOnUiThread(() -> {
+                if (transferDialog != null) { transferDialog.dismiss(); transferDialog = null; }
+                Toast.makeText(this, "Saved to " + target.getAbsolutePath() + " (" + readableSize(done) + ")", Toast.LENGTH_LONG).show();
+            });
+        } catch (Exception e) {
+            if (target.exists() && target.length() == 0) target.delete();
+            runOnUiThread(() -> {
+                if (transferDialog != null) { transferDialog.dismiss(); transferDialog = null; }
+                Toast.makeText(this, "Download failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            });
         }
     }
 
