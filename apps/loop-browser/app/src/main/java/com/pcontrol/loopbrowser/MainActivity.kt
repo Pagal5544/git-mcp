@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var desktopButton: Button
     private lateinit var automationToggle: Button
     private lateinit var automationPanel: LinearLayout
+    private lateinit var displayRow: LinearLayout
     private var desktopMode = false
     private var mobileUserAgent: String = ""
     private val loopHandler = Handler(Looper.getMainLooper())
@@ -111,30 +112,37 @@ class MainActivity : Activity() {
         addAction("Back") { if (browser.canGoBack()) browser.goBack() }
         addAction("Reload") { browser.reload() }
         addAction("Capture") { captureViewport() }
+        root.addView(actions)
+
+        displayRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(6.dp(), 0, 6.dp(), 2.dp())
+        }
         desktopButton = Button(this).apply {
             text = "Desktop: Off"
             isAllCaps = false
             textSize = 12f
             setPadding(2.dp(), 0, 2.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f).apply {
-                marginEnd = 3.dp()
+            layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f).apply {
+                marginEnd = 4.dp()
             }
             setOnClickListener { toggleDesktopMode() }
         }
-        actions.addView(desktopButton)
+        displayRow.addView(desktopButton)
         automationToggle = Button(this).apply {
             text = "Tools"
             isAllCaps = false
             textSize = 12f
             setPadding(2.dp(), 0, 2.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f)
+            layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f)
             setOnClickListener {
                 automationPanel.visibility = if (automationPanel.visibility == View.GONE) View.VISIBLE else View.GONE
                 text = if (automationPanel.visibility == View.VISIBLE) "Hide tools" else "Tools"
             }
         }
-        actions.addView(automationToggle)
-        root.addView(actions)
+        displayRow.addView(automationToggle)
+        root.addView(displayRow)
 
         automationPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -158,16 +166,20 @@ class MainActivity : Activity() {
         loopButton = Button(this).apply {
             text = "Start Observe Loop"
             isAllCaps = false
-            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f).apply {
+            minHeight = 44.dp()
+            layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f).apply {
                 marginEnd = 4.dp()
             }
+            setPadding(4.dp(), 0, 4.dp(), 0)
             setOnClickListener { toggleObserveLoop() }
         }
         loopActions.addView(loopButton)
         loopActions.addView(Button(this).apply {
             text = "Observe Now"
             isAllCaps = false
-            layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f)
+            minHeight = 44.dp()
+            layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f)
+            setPadding(4.dp(), 0, 4.dp(), 0)
             setOnClickListener { observeAndAct(false) }
         })
         automationPanel.addView(loopActions)
@@ -246,7 +258,7 @@ class MainActivity : Activity() {
                 mobileUserAgent
             }
         }
-        desktopButton.text = if (desktopMode) "Desktop mode: On" else "Desktop mode: Off"
+        desktopButton.text = if (desktopMode) "Desktop: On" else "Desktop: Off"
         val currentUrl = browser.url ?: address.text.toString()
         if (currentUrl.isNotBlank()) browser.loadUrl(currentUrl)
         status.text = if (desktopMode) "Desktop mode enabled • reloading page" else "Mobile mode enabled • reloading page"
