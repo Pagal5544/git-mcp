@@ -46,7 +46,7 @@ class MainActivity : Activity() {
             setPadding(8, 8, 8, 4)
         }
         address = EditText(this).apply {
-            singleLine = true
+            setSingleLine(true)
             hint = "Enter URL or search"
             setText("https://example.com")
             imeOptions = EditorInfo.IME_ACTION_GO
