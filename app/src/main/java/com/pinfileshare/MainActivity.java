@@ -51,6 +51,9 @@ import com.google.zxing.MultiFormatWriter;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
+import com.journeyapps.barcodescanner.ScanContract;
+import com.journeyapps.barcodescanner.ScanOptions;
+import androidx.activity.result.ActivityResultLauncher;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -61,6 +64,13 @@ public class MainActivity extends Activity {
     private static final int PORT = 8765;
     private static final int REQUEST_WIFI_DIRECT = 600;
     private static final int REQUEST_CAMERA_SCAN = 601;
+    private final ActivityResultLauncher<ScanOptions> qrScanner =
+        registerForActivityResult(new ScanContract(), result -> {
+            String scanned = result.getContents();
+            if (scanned != null && !scanned.trim().isEmpty()) {
+                connectFromQr(scanned.trim());
+            }
+        });
     private WifiP2pManager p2pManager;
     private WifiP2pManager.Channel p2pChannel;
     private BroadcastReceiver p2pReceiver;
@@ -200,13 +210,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == IntentIntegrator.REQUEST_CODE) {
-            IntentResult scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
-            if (scan != null && scan.getContents() != null) {
-                connectFromQr(scan.getContents());
-            }
-            return;
-        }
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (requestCode == PICK_FILE) {
@@ -229,15 +232,18 @@ public class MainActivity extends Activity {
             return;
         }
         try {
-            new IntentIntegrator(this)
-                .setCaptureActivity(com.journeyapps.barcodescanner.CaptureActivity.class)
-                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-                .setPrompt("Scan the sender's PIN File Share QR")
-                .setBeepEnabled(false)
-                .setOrientationLocked(false)
-                .initiateScan();
-        } catch (Exception e) {
-            Toast.makeText(this, "Could not open QR scanner: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            ScanOptions options = new ScanOptions();
+            options.setDesiredBarcodeFormats(ScanOptions.QR_CODE);
+            options.setPrompt("Scan the sender's PIN File Share QR");
+            options.setBeepEnabled(false);
+            options.setOrientationLocked(false);
+            qrScanner.launch(options);
+        } catch (androidx.activity.result.ActivityNotFoundException e) {
+            Toast.makeText(this, "QR scanner activity is unavailable. Reinstall the latest APK.", Toast.LENGTH_LONG).show();
+            android.util.Log.e("PinFileShare", "QR scanner activity unavailable", e);
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "Could not open QR scanner. Check camera permission and try again.", Toast.LENGTH_LONG).show();
+            android.util.Log.e("PinFileShare", "QR scanner launch failed", e);
         }
     }
 
