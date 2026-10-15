@@ -1,6 +1,6 @@
 package com.pinfileshare;
 
-import android.app.Activity;
+import androidx.activity.ComponentActivity;
 import android.app.AlertDialog;
 import android.Manifest;
 import android.content.BroadcastReceiver;
@@ -58,7 +58,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
     private static final int PICK_FILE = 41;
     private static final int SAVE_FILE = 42;
     private static final int PORT = 8765;
@@ -238,7 +238,7 @@ public class MainActivity extends Activity {
             options.setBeepEnabled(false);
             options.setOrientationLocked(false);
             qrScanner.launch(options);
-        } catch (androidx.activity.result.ActivityNotFoundException e) {
+        } catch (android.content.ActivityNotFoundException e) {
             Toast.makeText(this, "QR scanner activity is unavailable. Reinstall the latest APK.", Toast.LENGTH_LONG).show();
             android.util.Log.e("PinFileShare", "QR scanner activity unavailable", e);
         } catch (RuntimeException e) {
