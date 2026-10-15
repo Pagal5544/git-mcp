@@ -137,8 +137,10 @@ class MainActivity : Activity() {
             setPadding(2.dp(), 0, 2.dp(), 0)
             layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f)
             setOnClickListener {
-                automationPanel.visibility = if (automationPanel.visibility == View.GONE) View.VISIBLE else View.GONE
-                text = if (automationPanel.visibility == View.VISIBLE) "Hide tools" else "Tools"
+                val showing = automationPanel.visibility == View.GONE
+                automationPanel.visibility = if (showing) View.VISIBLE else View.GONE
+                status.visibility = if (showing || loopRunning) View.VISIBLE else View.GONE
+                text = if (showing) "Hide tools" else "Tools"
             }
         }
         displayRow.addView(automationToggle)
@@ -194,6 +196,7 @@ class MainActivity : Activity() {
         ))
 
         status = TextView(this).apply {
+            visibility = View.GONE
             text = "Loop Browser • local prototype"
             setPadding(8.dp(), 2.dp(), 8.dp(), 2.dp())
             textSize = 11f
@@ -266,7 +269,8 @@ class MainActivity : Activity() {
 
     private fun toggleObserveLoop() {
         loopRunning = !loopRunning
-        loopButton.text = if (loopRunning) "Stop Observe Loop" else "Start Observe Loop"
+        loopButton.text = if (loopRunning) "Stop Loop" else "Start Loop"
+        status.visibility = if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         if (loopRunning) {
             loopStep = 0
             status.text = "Observe loop started • 5-second interval"
@@ -274,6 +278,7 @@ class MainActivity : Activity() {
         } else {
             loopHandler.removeCallbacksAndMessages(null)
             status.text = "Observe loop stopped"
+            status.visibility = if (automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         }
     }
 
