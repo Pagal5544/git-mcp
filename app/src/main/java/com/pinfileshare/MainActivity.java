@@ -433,7 +433,7 @@ public class MainActivity extends Activity {
         try {
             WifiP2pConfig config = new WifiP2pConfig();
             config.deviceAddress = device.deviceAddress;
-            config.wps.setup = android.net.wifi.p2p.WpsInfo.PBC;
+            config.wps.setup = android.net.wifi.WpsInfo.PBC;
             p2pManager.connect(p2pChannel, config, new WifiP2pManager.ActionListener() {
                 @Override public void onSuccess() {
                     Toast.makeText(MainActivity.this, "Pairing request sent. Accept any Android connection prompt.", Toast.LENGTH_LONG).show();
