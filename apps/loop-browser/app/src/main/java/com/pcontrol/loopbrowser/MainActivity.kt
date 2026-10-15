@@ -41,6 +41,8 @@ class MainActivity : Activity() {
     private lateinit var addressBar: LinearLayout
     private lateinit var actionsRow: LinearLayout
     private lateinit var fullscreenButton: Button
+    private lateinit var stripToggleButton: Button
+    private var stripHidden = false
     private var fullscreenMode = false
     private var desktopMode = false
     private var mobileUserAgent: String = ""
@@ -224,12 +226,36 @@ class MainActivity : Activity() {
         }
         root.addView(status)
 
-        browser = WebView(this).apply {
+        val browserFrame = android.widget.FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
         }
-        root.addView(browser)
+        browser = WebView(this).apply {
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        browserFrame.addView(browser)
+        stripToggleButton = Button(this).apply {
+            text = "☰"
+            contentDescription = "Show browser controls"
+            isAllCaps = false
+            minWidth = 40.dp()
+            minHeight = 40.dp()
+            setPadding(0, 0, 0, 0)
+            visibility = View.GONE
+            alpha = 0.92f
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                44.dp(), 44.dp(), android.view.Gravity.TOP or android.view.Gravity.END
+            ).apply {
+                topMargin = 8.dp()
+                marginEnd = 8.dp()
+            }
+            setOnClickListener { setControlStripHidden(false) }
+        }
+        browserFrame.addView(stripToggleButton)
+        root.addView(browserFrame)
         setContentView(root)
         root.requestApplyInsets()
         root.isFocusableInTouchMode = true
@@ -272,6 +298,12 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun setControlStripHidden(hidden: Boolean) {
+        stripHidden = hidden
+        displayRow.visibility = if (hidden) View.GONE else View.VISIBLE
+        stripToggleButton.visibility = if (hidden && fullscreenMode) View.VISIBLE else View.GONE
+    }
+
     private fun toggleFullscreen() {
         fullscreenMode = !fullscreenMode
         addressBar.visibility = if (fullscreenMode) View.GONE else View.VISIBLE
@@ -282,6 +314,8 @@ class MainActivity : Activity() {
             if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         progress.visibility = if (fullscreenMode) View.GONE else progress.visibility
         fullscreenButton.text = if (fullscreenMode) "Exit full" else "Full"
+        if (!fullscreenMode) setControlStripHidden(false)
+        else setControlStripHidden(stripHidden)
         displayRow.setBackgroundColor(if (fullscreenMode) 0xFFE3E7EE.toInt() else 0xFFF5F7FB.toInt())
         if (fullscreenMode) {
             address.clearFocus()
