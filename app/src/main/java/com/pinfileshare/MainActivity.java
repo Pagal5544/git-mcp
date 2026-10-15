@@ -362,16 +362,47 @@ public class MainActivity extends Activity {
                         .setOnCancelListener(d -> stopServer()).show());
                 }
                 @Override public void onFailure(int reason) {
-                    stopServer();
-                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("Could not start direct sharing")
-                        .setMessage("Android could not create a Wi-Fi Direct group (code " + reason + "). Close any old transfer and try again.")
-                        .setPositiveButton("OK", null).show());
+                    // On some Android builds a group may already exist or createGroup is restricted.
+                    // Try discovery first and provide a clear diagnostic if the vendor refuses it again.
+                    try {
+                        p2pManager.removeGroup(p2pChannel, new WifiP2pManager.ActionListener() {
+                            @Override public void onSuccess() { retryCreateGroup(reason); }
+                            @Override public void onFailure(int removeReason) { retryCreateGroup(reason); }
+                        });
+                    } catch (Exception ignored) {
+                        retryCreateGroup(reason);
+                    }
                 }
             });
         } catch (SecurityException e) {
             stopServer();
             Toast.makeText(this, "Allow location/nearby permission and try again.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void retryCreateGroup(int firstReason) {
+        try {
+            p2pManager.createGroup(p2pChannel, new WifiP2pManager.ActionListener() {
+                @Override public void onSuccess() {
+                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Direct share ready")
+                        .setView(makeSharePreview())
+                        .setMessage("Wi-Fi Direct group created. On the other phone, tap Scan sender QR and choose this phone from the nearby device list.")
+                        .setPositiveButton("Keep sharing", (d, w) -> { })
+                        .setNegativeButton("Stop sharing", (d, w) -> stopServer())
+                        .setOnCancelListener(d -> stopServer()).show());
+                }
+                @Override public void onFailure(int secondReason) {
+                    stopServer();
+                    runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Wi-Fi Direct unavailable")
+                        .setMessage("Android rejected group creation (code " + secondReason + "; first attempt " + firstReason + "). Check system Wi-Fi Direct state, disconnect other Wi-Fi Direct sessions, and try again.")
+                        .setPositiveButton("OK", null).show());
+                }
+            });
+        } catch (Exception e) {
+            stopServer();
+            Toast.makeText(this, "Wi-Fi Direct retry failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
