@@ -25,9 +25,13 @@ The user should not need to compile the Android project on their phone.
 - GitHub repository: [`Pagal5544/git-mcp`](https://github.com/Pagal5544/git-mcp)
 - Relevant branches: `main` and `feat/github-oauth-mcp`.
 - Existing Cloudflare Worker endpoint: `https://git-mcp.dolatrammpi.workers.dev/mcp`.
-- The repository has an `Android APK Build` workflow at `.github/workflows/android-build.yml` on both checked branches.
-- That workflow runs `./gradlew --no-daemon assembleDebug` and uploads `app/build/outputs/apk/debug/*.apk` as the `android-debug-apk` artifact.
-- The checked repository root did **not** contain the Android Gradle project files such as `gradlew` and `app/`. Therefore, the workflow exists, but a successful APK build has **not** been verified.
+- The bridge's `main` and `feat/github-oauth-mcp` branches are to remain protected and unchanged by app implementation work.
+- Android app development is currently isolated on `feat/pin-file-share-android` in this same repository, as the chosen temporary approach. Do not move app work onto `main` or `feat/github-oauth-mcp`.
+- The app branch contains a Gradle Android project (`settings.gradle.kts`, root `build.gradle.kts`, `gradle.properties`, `app/build.gradle.kts`, manifest, and `MainActivity.java`) plus `.github/workflows/android-build.yml`.
+- **Verified success (2026-10-15):** GitHub Actions run [38674327285](https://github.com/Pagal5544/git-mcp/actions/runs/38674327285) completed successfully. The `Build debug APK` step reported `BUILD SUCCESSFUL`, and the `android-debug-apk` artifact uploaded successfully.
+- Artifact ID: `11945014071`; size: 8,887 bytes; artifact download page: [Download android-debug-apk](https://github.com/Pagal5544/git-mcp/actions/runs/38674327285/artifacts/11945014071). It expires on 2026-10-22 unless downloaded or a new artifact is produced.
+- The workflow installs Android SDK platform/build tools, sets up JDK 17 and Gradle 8.9, runs `gradle --no-daemon assembleDebug`, and uploads `app/build/outputs/apk/debug/*.apk`.
+- The current APK is an **early UI prototype only**. The Send file picker and Receive UI are present, but PIN pairing and actual file transfer are not implemented; a successful build does not mean a real transfer has been tested.
 - Recent Worker Type Check runs succeeded, but that alone does not prove the live Worker was deployed with the exact current branch code.
 - GIT MCP read/write operations were tested successfully. Keep preserving those working operations.
 - The builder workflow is currently in the bridge repository; do not assume this automatically makes the MCP capable of targeting arbitrary repositories.
@@ -88,13 +92,14 @@ Do not promise that a PIN alone can connect two phones over every network. Choos
 
 ## 6. Build and debug loop
 
-1. Create/use a **separate app repository**; do not place the Android app source in the MCP bridge repository.
-2. Ensure the app repository has a valid Gradle wrapper, Android Gradle configuration, `app/` module, manifest, and source code.
-3. Add or adapt an Android GitHub Actions workflow in the app repository. Build a debug APK with `assembleDebug`.
-4. Upload the APK as a GitHub Actions artifact.
-5. Trigger the workflow through GIT MCP, inspect its status and logs, and fix failures in the app repository only.
-6. Download/check the artifact and install/test it before calling the prototype complete.
-7. Keep source changes, build results, and deployment state clearly distinguished.
+1. For now, keep the Android app isolated on `feat/pin-file-share-android` in `Pagal5544/git-mcp`; this is a deliberate temporary choice and does not authorize changes to bridge code.
+2. Keep the Android Gradle project, manifest, Java source, and workflow together on that app branch.
+3. Build a debug APK with GitHub Actions (`assembleDebug`). **Completed successfully on 2026-10-15.**
+4. Upload the APK as the `android-debug-apk` GitHub Actions artifact. **Completed successfully; artifact ID `11945014071`.**
+5. Trigger workflows through GIT MCP, inspect statuses/logs, and fix build failures only on the app branch. **First successful build verified.**
+6. Download the artifact, install it on a supported Android phone, and inspect the UI. **Still to do; do not equate artifact upload with device installation/testing.**
+7. Keep source changes, build results, device test results, and deployment state clearly distinguished.
+8. Revisit whether to move the app to a separate repository later, only as a planned step that preserves the working MCP bridge.
 
 ## 7. Work sequence / checklist
 
@@ -107,19 +112,48 @@ Do not promise that a PIN alone can connect two phones over every network. Choos
 - [ ] Test repository selection/read/write/workflow dispatch on a dedicated test repository.
 - [ ] Review security, authorization, and secret handling.
 - [ ] Only after explicit verification, plan merge/deployment and re-test the live bridge.
-- [ ] Create a separate PIN File Share app repository.
-- [ ] Implement the minimum Android prototype and build it with GitHub Actions.
-- [ ] Verify the APK artifact and test a real transfer between two phones.
+- [x] Create the initial Android app project on the isolated `feat/pin-file-share-android` branch (temporary same-repository approach).
+- [x] Add the initial Send/Receive UI and Android GitHub Actions build workflow.
+- [x] Fix Android SDK package installation in the workflow and obtain a successful `assembleDebug` build.
+- [x] Verify successful upload of the `android-debug-apk` artifact (ID `11945014071`).
+- [ ] Download the artifact ZIP, extract the APK, and install it on a supported Android device.
+- [ ] Test the current UI on-device and fix any install/runtime issues.
+- [ ] Design the actual PIN pairing and transfer architecture, including same-network vs cross-network behavior.
+- [ ] Implement expiring PINs, rate limiting, receiver consent, encrypted transport, integrity/hash verification, progress, cancellation, and error handling.
+- [ ] Test a real file transfer between two phones, including invalid/expired PINs and interrupted transfers.
+- [ ] Consider moving app code to a separate repository later, without touching protected bridge branches or changing the live Worker without explicit approval.
 
-## 8. Definition of done
+## 8. Current implementation status
+
+### Completed
+
+- [x] Isolated app branch created: `feat/pin-file-share-android`.
+- [x] Minimal native Java Android project and Send/Receive prototype UI added.
+- [x] GitHub Actions workflow configured for JDK 17, Android SDK platform/build tools, and Gradle 8.9.
+- [x] Workflow SDK setup issue corrected by installing `platforms;android-35` and `build-tools;35.0.0` with `sdkmanager --install` separately.
+- [x] Build run `38674327285` succeeded (`BUILD SUCCESSFUL`, 1m 44s) and artifact upload succeeded.
+- [x] Artifact metadata verified: `android-debug-apk`, ID `11945014071`, 8,887 bytes, expires 2026-10-22.
+
+### Not yet completed
+
+- [ ] Download/extract and install APK on a phone.
+- [ ] Implement PIN creation, expiry, validation, and phone-to-phone pairing.
+- [ ] Implement actual transfer transport and receiving/saving files.
+- [ ] Add receiver confirmation, encryption, integrity verification, and transfer-state/error handling.
+- [ ] Test end-to-end transfer between two phones.
+
+The current successful build proves the project compiles and the artifact uploads; it does **not** prove installation or file-transfer functionality.
+
+## 9. Definition of done
 
 This project is complete only when:
 
 - The existing GIT MCP bridge and OAuth connection still work.
 - Existing default-repository behavior remains compatible.
 - ChatGPT can safely operate on a separately selected authorized app repository.
-- The PIN File Share Android app builds successfully in GitHub Actions.
-- A downloadable APK artifact is available.
+- The PIN File Share Android app builds successfully in GitHub Actions. **Initial debug build verified on 2026-10-15.**
+- A downloadable APK artifact is available. **Initial artifact verified; ID `11945014071`.**
+- The APK has been installed and tested on a supported device, and a real file transfer between two phones has been verified.
 - A real file transfer between two phones has been tested, including invalid/expired PIN handling.
 - Neither `Quiz` nor `termux-quiz-mcp` was modified.
 
