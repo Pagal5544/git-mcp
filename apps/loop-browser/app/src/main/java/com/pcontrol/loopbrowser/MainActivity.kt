@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
+import android.content.Context
 import android.view.inputmethod.EditorInfo
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -36,6 +38,10 @@ class MainActivity : Activity() {
     private lateinit var automationToggle: Button
     private lateinit var automationPanel: LinearLayout
     private lateinit var displayRow: LinearLayout
+    private lateinit var addressBar: LinearLayout
+    private lateinit var actionsRow: LinearLayout
+    private lateinit var fullscreenButton: Button
+    private var fullscreenMode = false
     private var desktopMode = false
     private var mobileUserAgent: String = ""
     private val loopHandler = Handler(Looper.getMainLooper())
@@ -90,6 +96,7 @@ class MainActivity : Activity() {
             )
             setOnClickListener { navigate(address.text.toString()) }
         })
+        addressBar = bar
         root.addView(bar)
 
         val actions = LinearLayout(this).apply {
@@ -112,6 +119,7 @@ class MainActivity : Activity() {
         addAction("Back") { if (browser.canGoBack()) browser.goBack() }
         addAction("Reload") { browser.reload() }
         addAction("Capture") { captureViewport() }
+        actionsRow = actions
         root.addView(actions)
 
         displayRow = LinearLayout(this).apply {
@@ -144,6 +152,17 @@ class MainActivity : Activity() {
             }
         }
         displayRow.addView(automationToggle)
+        fullscreenButton = Button(this).apply {
+            text = "Full"
+            isAllCaps = false
+            textSize = 12f
+            setPadding(2.dp(), 0, 2.dp(), 0)
+            layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f).apply {
+                marginStart = 4.dp()
+            }
+            setOnClickListener { toggleFullscreen() }
+        }
+        displayRow.addView(fullscreenButton)
         root.addView(displayRow)
 
         automationPanel = LinearLayout(this).apply {
@@ -213,6 +232,10 @@ class MainActivity : Activity() {
         root.addView(browser)
         setContentView(root)
         root.requestApplyInsets()
+        root.isFocusableInTouchMode = true
+        root.requestFocus()
+        address.clearFocus()
+        address.showSoftInputOnFocus = false
 
         address.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO) {
@@ -247,6 +270,24 @@ class MainActivity : Activity() {
                 address.setText(url.orEmpty())
                 status.text = "Ready • " + url.orEmpty()
             }
+        }
+    }
+
+    private fun toggleFullscreen() {
+        fullscreenMode = !fullscreenMode
+        addressBar.visibility = if (fullscreenMode) View.GONE else View.VISIBLE
+        actionsRow.visibility = if (fullscreenMode) View.GONE else View.VISIBLE
+        automationPanel.visibility = if (fullscreenMode) View.GONE else
+            if (automationToggle.text == "Hide tools") View.VISIBLE else View.GONE
+        status.visibility = if (fullscreenMode) View.GONE else
+            if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+        progress.visibility = if (fullscreenMode) View.GONE else progress.visibility
+        fullscreenButton.text = if (fullscreenMode) "Exit full" else "Full"
+        displayRow.setBackgroundColor(if (fullscreenMode) 0xFFE3E7EE.toInt() else 0xFFF5F7FB.toInt())
+        if (fullscreenMode) {
+            address.clearFocus()
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.hideSoftInputFromWindow(address.windowToken, 0)
         }
     }
 
