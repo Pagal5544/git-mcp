@@ -4,6 +4,8 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -28,6 +30,11 @@ class MainActivity : Activity() {
     private lateinit var address: EditText
     private lateinit var progress: ProgressBar
     private lateinit var status: TextView
+    private lateinit var selectorInput: EditText
+    private lateinit var loopButton: Button
+    private val loopHandler = Handler(Looper.getMainLooper())
+    private var loopRunning = false
+    private var loopStep = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,7 +52,6 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFFF5F7FB.toInt())
-            // Respect status/navigation bars on Android versions that enforce edge-to-edge.
             setOnApplyWindowInsetsListener { view, insets ->
                 view.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
                 insets
@@ -101,6 +107,42 @@ class MainActivity : Activity() {
         addAction("Reload") { browser.reload() }
         addAction("Capture") { captureViewport() }
         root.addView(actions)
+
+        val automationPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(8.dp(), 0, 8.dp(), 4.dp())
+        }
+        selectorInput = EditText(this).apply {
+            setSingleLine(true)
+            hint = "Optional CSS selector to click each cycle"
+            textSize = 14f
+            setPadding(8.dp(), 0, 8.dp(), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 44.dp()
+            )
+        }
+        automationPanel.addView(selectorInput)
+        val loopActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        loopButton = Button(this).apply {
+            text = "Start Observe Loop"
+            isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(0, 42.dp(), 1f).apply {
+                marginEnd = 4.dp()
+            }
+            setOnClickListener { toggleObserveLoop() }
+        }
+        loopActions.addView(loopButton)
+        loopActions.addView(Button(this).apply {
+            text = "Observe Now"
+            isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(0, 42.dp(), 1f)
+            setOnClickListener { observeAndAct(false) }
+        })
+        automationPanel.addView(loopActions)
+        root.addView(automationPanel)
 
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -163,6 +205,77 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun toggleObserveLoop() {
+        loopRunning = !loopRunning
+        loopButton.text = if (loopRunning) "Stop Observe Loop" else "Start Observe Loop"
+        if (loopRunning) {
+            loopStep = 0
+            status.text = "Observe loop started • 5-second interval"
+            observeAndAct(true)
+        } else {
+            loopHandler.removeCallbacksAndMessages(null)
+            status.text = "Observe loop stopped"
+        }
+    }
+
+    private fun observeAndAct(continueLoop: Boolean) {
+        if (!::browser.isInitialized || isFinishing) return
+        loopStep++
+        val selector = selectorInput.text.toString().trim()
+        val safeSelector = org.json.JSONObject.quote(selector)
+        val script = """
+            (function() {
+              var selector = $safeSelector;
+              var clicked = false;
+              if (selector) {
+                try {
+                  var target = document.querySelector(selector);
+                  if (target) {
+                    target.click();
+                    clicked = true;
+                  }
+                } catch (e) {}
+              }
+              return JSON.stringify({
+                title: document.title || '',
+                url: location.href,
+                readyState: document.readyState,
+                text: (document.body ? document.body.innerText : '').slice(0, 1200),
+                selector: selector,
+                clicked: clicked
+              });
+            })();
+        """.trimIndent()
+        browser.evaluateJavascript(script) { result ->
+            val decoded = try {
+                val raw = if (result == null || result == "null") "{}" else
+                    org.json.JSONTokener(result).nextValue().toString()
+                org.json.JSONObject(raw)
+            } catch (_: Exception) { org.json.JSONObject() }
+            val title = decoded.optString("title", browser.title.orEmpty())
+            val clicked = decoded.optBoolean("clicked", false)
+            status.text = "Loop #$loopStep • " + (if (clicked) "clicked" else "observed") + " • " + title
+            saveViewportCapture("loop-$loopStep")
+            if (continueLoop && loopRunning) {
+                loopHandler.postDelayed({ observeAndAct(true) }, 5000L)
+            }
+        }
+    }
+
+    private fun saveViewportCapture(prefix: String) {
+        if (browser.width <= 0 || browser.height <= 0) return
+        try {
+            val bitmap = Bitmap.createBitmap(browser.width, browser.height, Bitmap.Config.ARGB_8888)
+            browser.draw(Canvas(bitmap))
+            val folder = File(getExternalFilesDir(null), "captures")
+            if (!folder.exists()) folder.mkdirs()
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
+            val output = File(folder, "$prefix-$stamp.png")
+            FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 90, it) }
+            bitmap.recycle()
+        } catch (_: Exception) { }
+    }
+
     private fun navigate(raw: String) {
         val input = raw.trim()
         if (input.isEmpty()) return
@@ -200,6 +313,13 @@ class MainActivity : Activity() {
             status.text = "Capture failed: " + e.javaClass.simpleName
             Toast.makeText(this, "Screenshot capture failed", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    override fun onDestroy() {
+        loopRunning = false
+        loopHandler.removeCallbacksAndMessages(null)
+        if (::browser.isInitialized) browser.destroy()
+        super.onDestroy()
     }
 
     @Deprecated("Deprecated in Android API; kept for API 26 compatibility")
