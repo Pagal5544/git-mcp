@@ -1,4 +1,5 @@
 {
+  "keep_vars": true,
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "git-mcp",
   "main": "src/index.ts",
