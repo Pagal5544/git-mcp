@@ -166,8 +166,12 @@ public class MainActivity extends Activity {
             Color.rgb(92, 105, 123)));
         addGap(receiveCard, 18);
         Button receive = button("Scan sender QR", Color.rgb(226, 234, 246), Color.rgb(22, 52, 92));
-        receive.setOnClickListener(v -> showReceiveForm());
+        receive.setOnClickListener(v -> startQrScan());
         receiveCard.addView(receive);
+        addGap(receiveCard, 6);
+        Button manual = button("Enter IP manually", Color.rgb(242, 245, 249), Color.rgb(45, 59, 79));
+        manual.setOnClickListener(v -> showReceiveForm());
+        receiveCard.addView(manual);
         root.addView(receiveCard);
 
         addGap(root, 22);
@@ -226,6 +230,7 @@ public class MainActivity extends Activity {
         }
         try {
             new IntentIntegrator(this)
+                .setCaptureActivity(com.journeyapps.barcodescanner.CaptureActivity.class)
                 .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
                 .setPrompt("Scan the sender's PIN File Share QR")
                 .setBeepEnabled(false)
