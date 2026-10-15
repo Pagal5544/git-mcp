@@ -31,7 +31,10 @@ The user should not need to compile the Android project on their phone.
 - **Verified success (2026-10-15):** GitHub Actions run [38674327285](https://github.com/Pagal5544/git-mcp/actions/runs/38674327285) completed successfully. The `Build debug APK` step reported `BUILD SUCCESSFUL`, and the `android-debug-apk` artifact uploaded successfully.
 - Artifact ID: `11945014071`; size: 8,887 bytes; artifact download page: [Download android-debug-apk](https://github.com/Pagal5544/git-mcp/actions/runs/38674327285/artifacts/11945014071). It expires on 2026-10-22 unless downloaded or a new artifact is produced.
 - The workflow installs Android SDK platform/build tools, sets up JDK 17 and Gradle 8.9, runs `gradle --no-daemon assembleDebug`, and uploads `app/build/outputs/apk/debug/*.apk`.
-- The current APK is an **early UI prototype only**. The Send file picker and Receive UI are present, but PIN pairing and actual file transfer are not implemented; a successful build does not mean a real transfer has been tested.
+- The first APK was a UI prototype and installed/launched successfully on the user's phone.
+- **MVP implementation added on 2026-10-15** to `feat/pin-file-share-android`: local same-Wi-Fi socket transfer, sender IP/port display, six-digit PIN, 10-minute expiry, maximum five wrong PIN attempts, receiver metadata check and explicit consent, Android save-location picker, and one-download restriction. Network permission and Wi-Fi state permission were added.
+- Build run [38675230821](https://github.com/Pagal5544/git-mcp/actions/runs/38675230821) is running to compile this new implementation; do not call it successful until its result and artifact are verified.
+- The current MVP uses unencrypted local-network traffic. It is for testing on a trusted private Wi-Fi only; encryption and end-to-end two-phone transfer verification remain pending.
 - Recent Worker Type Check runs succeeded, but that alone does not prove the live Worker was deployed with the exact current branch code.
 - GIT MCP read/write operations were tested successfully. Keep preserving those working operations.
 - The builder workflow is currently in the bridge repository; do not assume this automatically makes the MCP capable of targeting arbitrary repositories.
@@ -138,8 +141,10 @@ Do not promise that a PIN alone can connect two phones over every network. Choos
 ### Not yet completed
 
 - [x] APK installed and app launched on a real Android phone; initial UI confirmed from user screenshot (2026-10-15).
-- [ ] Implement PIN creation, expiry, validation, and phone-to-phone pairing.
-- [ ] Implement actual transfer transport and receiving/saving files.
+- [x] Add initial same-Wi-Fi PIN transfer code and receiving/saving flow on `feat/pin-file-share-android` (build and device testing pending).
+- [ ] Verify the new implementation compiles and produces a fresh APK artifact.
+- [ ] Install the new APK and test an end-to-end transfer between two phones.
+- [ ] Implement secure encrypted transport before treating the app as safe for sensitive files.
 - [ ] Add receiver confirmation, encryption, integrity verification, and transfer-state/error handling.
 - [ ] Test end-to-end transfer between two phones.
 
