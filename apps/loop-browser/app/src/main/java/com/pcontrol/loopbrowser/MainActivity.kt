@@ -561,9 +561,26 @@ class MainActivity : Activity() {
             if (!folder.exists()) folder.mkdirs()
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
             val output = File(folder, "$prefix-$stamp.png")
-            FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 90, it) }
+            val saved = FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 90, it) }
             bitmap.recycle()
-        } catch (_: Exception) { }
+            if (saved && output.exists() && output.length() > 0L) {
+                latestCaptureFileName = output.name
+                latestCaptureOk = true
+                latestCaptureTimestamp = System.currentTimeMillis()
+                android.util.Log.i(
+                    "LoopBrowserBridge",
+                    "Observe-loop capture completed: step=$loopStep file=$latestCaptureFileName bytes=${output.length()}"
+                )
+            } else {
+                latestCaptureOk = false
+                latestCaptureTimestamp = System.currentTimeMillis()
+                android.util.Log.w("LoopBrowserBridge", "Observe-loop capture failed: step=$loopStep")
+            }
+        } catch (e: Exception) {
+            latestCaptureOk = false
+            latestCaptureTimestamp = System.currentTimeMillis()
+            android.util.Log.e("LoopBrowserBridge", "Observe-loop capture exception: step=$loopStep", e)
+        }
     }
 
     private fun navigate(raw: String) {
