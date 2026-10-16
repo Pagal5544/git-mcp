@@ -360,7 +360,7 @@ class MainActivity : Activity() {
             ): Boolean {
                 val uri = request?.url ?: return false
                 if (isGoogleAccountSignInUrl(uri)) {
-                    openGoogleSignInInSecureBrowser(uri)
+                    openGoogleSignInInSecureBrowser(uri, handoffCurrentSite = true)
                     return true
                 }
                 return false
@@ -1147,14 +1147,37 @@ class MainActivity : Activity() {
             uri.host.equals("accounts.google.com", ignoreCase = true)
     }
 
-    private fun openGoogleSignInInSecureBrowser(uri: android.net.Uri) {
+    private fun openGoogleSignInInSecureBrowser(
+        uri: android.net.Uri, handoffCurrentSite: Boolean = false
+    ) {
+        // Google blocks OAuth inside embedded WebViews. Move the entire relying-party
+        // page to a real browser so its Google OAuth redirect and resulting site session
+        // remain together in that browser. Do not attempt to copy cookies into WebView.
+        val currentPage = browser.url?.let { android.net.Uri.parse(it) }
+        val handoffUri = if (
+            handoffCurrentSite &&
+            currentPage != null &&
+            (currentPage.scheme.equals("https", true) || currentPage.scheme.equals("http", true)) &&
+            !isGoogleAccountSignInUrl(currentPage)
+        ) currentPage else uri
+
         try {
-            CustomTabsIntent.Builder().build().launchUrl(this, uri)
-            status.text = "Google sign-in opened in secure browser"
+            CustomTabsIntent.Builder().build().launchUrl(this, handoffUri)
+            Toast.makeText(
+                this,
+                "Google sign-in needs a supported browser. In the opened tab, tap Sign in with Google again.",
+                Toast.LENGTH_LONG
+            ).show()
+            status.text = "Google sign-in handed off to secure browser"
         } catch (e: Exception) {
             try {
-                startActivity(Intent(Intent.ACTION_VIEW, uri))
-                status.text = "Google sign-in opened in external browser"
+                startActivity(Intent(Intent.ACTION_VIEW, handoffUri))
+                Toast.makeText(
+                    this,
+                    "Continue Google sign-in in the external browser.",
+                    Toast.LENGTH_LONG
+                ).show()
+                status.text = "Google sign-in handed off to external browser"
             } catch (fallbackError: Exception) {
                 Toast.makeText(
                     this,
