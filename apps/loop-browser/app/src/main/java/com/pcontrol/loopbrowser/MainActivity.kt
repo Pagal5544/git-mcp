@@ -63,6 +63,7 @@ class MainActivity : Activity() {
     @Volatile private var cachedBrowserWidth: Int = 0
     @Volatile private var cachedBrowserHeight: Int = 0
     @Volatile private var cachedCanGoBack: Boolean = false
+    @Volatile private var cachedCanGoForward: Boolean = false
     @Volatile private var latestCaptureFileName: String = ""
     @Volatile private var latestCaptureOk: Boolean = false
     @Volatile private var latestCaptureTimestamp: Long = 0L
@@ -355,6 +356,7 @@ class MainActivity : Activity() {
                 cachedBrowserWidth = view?.width ?: 0
                 cachedBrowserHeight = view?.height ?: 0
                 cachedCanGoBack = view?.canGoBack() ?: false
+                cachedCanGoForward = view?.canGoForward() ?: false
                 address.setText(url.orEmpty())
                 status.text = "Ready • " + url.orEmpty()
                 // Start observing automatically on the first completed page; no manual tap needed.
@@ -430,6 +432,7 @@ class MainActivity : Activity() {
                 .put("desktopMode", desktopMode)
                 .put("observeLoopRunning", loopRunning)
                 .put("canGoBack", cachedCanGoBack)
+                .put("canGoForward", cachedCanGoForward)
                 .put("viewportWidth", cachedBrowserWidth)
                 .put("viewportHeight", cachedBrowserHeight)
                 .put("lastCaptureOk", latestCaptureOk)
@@ -447,7 +450,7 @@ class MainActivity : Activity() {
         // it is queued on the UI thread. This prevents an old loading timestamp from
         // making the new request appear timed out while it is still waiting in the queue.
         if (route == "POST /v1/browser/navigate" || route == "POST /v1/browser/reload" ||
-            route == "POST /v1/browser/back") {
+            route == "POST /v1/browser/back" || route == "POST /v1/browser/forward") {
             cachedNavigationStatus = "queued"
             cachedNavigationError = ""
             cachedNavigationStartedAt = 0L
@@ -462,6 +465,7 @@ class MainActivity : Activity() {
                 when (route) {
                     "POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
                     "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
+                    "POST /v1/browser/forward" -> if (::browser.isInitialized && browser.canGoForward()) browser.goForward()
                     "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
                     "POST /v1/browser/capture" -> {
                         val capture = captureViewportForBridge()

@@ -92,7 +92,7 @@ class BrowserBridge(
                 val allowed = setOf(
                     "GET /health", "GET /v1/browser/state", "GET /v1/browser/screenshot",
                     "POST /v1/browser/navigate", "POST /v1/browser/back",
-                    "POST /v1/browser/reload", "POST /v1/browser/capture",
+                    "POST /v1/browser/forward", "POST /v1/browser/reload", "POST /v1/browser/capture",
                     "POST /v1/browser/start", "POST /v1/browser/stop"
                 )
                 if (key !in allowed) return respond(client, 404, JSONObject().put("error", "not found"))
