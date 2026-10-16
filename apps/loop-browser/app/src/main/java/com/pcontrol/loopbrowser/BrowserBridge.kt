@@ -1,7 +1,5 @@
 package com.pcontrol.loopbrowser
 
-import android.os.Handler
-import android.os.Looper
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -38,8 +36,9 @@ class BrowserBridge(
                         workers.execute { handle(client) }
                     } catch (_: SocketTimeoutException) { }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 running = false
+                android.util.Log.e("LoopBrowserBridge", "Listener failed to bind or accept on 127.0.0.1:8789", e)
             }
         }
     }
@@ -96,9 +95,17 @@ class BrowserBridge(
                     "POST /v1/browser/stop"
                 )
                 if (key !in allowed) return respond(client, 404, JSONObject().put("error", "not found"))
-                val result = actionHandler(key, payload)
+                // Health is deliberately independent of the Activity/UI thread.
+                // This lets Termux diagnose the listener even when the Activity is backgrounded.
+                val result = if (key == "GET /health") {
+                    JSONObject().put("ok", true).put("bridge", "loop-browser")
+                        .put("version", 1).put("running", running)
+                } else {
+                    actionHandler(key, payload)
+                }
                 respond(client, if (result.optBoolean("ok", true)) 200 else 400, result)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.e("LoopBrowserBridge", "Request handling failed", e)
                 try { respond(client, 500, JSONObject().put("error", "bridge request failed")) } catch (_: Exception) { }
             }
         }
