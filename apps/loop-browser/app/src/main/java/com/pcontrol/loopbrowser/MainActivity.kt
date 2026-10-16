@@ -722,17 +722,21 @@ class MainActivity : Activity() {
     private fun selectAllInFocusedElement() {
         val script = """
             (function() {
-              const el = document.activeElement;
-              if (!el) return JSON.stringify({ok:false,error:'no_focused_element'});
+              const active = document.activeElement;
+              if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
+              // Code editors such as GitHub's CodeMirror use a contenteditable editor root.
+              const editableRoot = active.closest && active.closest('[contenteditable="true"],[role="textbox"]');
+              const el = editableRoot || active;
               if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
                   typeof el.select === 'function' && !el.disabled && !el.readOnly) {
-                el.select();
-                return JSON.stringify({ok:true,length:(el.value || '').length});
+                el.focus(); el.select();
+                return JSON.stringify({ok:true,length:(el.value || '').length,kind:'form-control'});
               }
-              if (el.isContentEditable) {
+              if (el.isContentEditable || (el.getAttribute && el.getAttribute('role') === 'textbox')) {
+                el.focus();
                 const range = document.createRange(); range.selectNodeContents(el);
                 const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-                return JSON.stringify({ok:true,length:selection.toString().length});
+                return JSON.stringify({ok:true,length:selection.toString().length,kind:'contenteditable'});
               }
               return JSON.stringify({ok:false,error:'focus_an_editable_field_first'});
             })()
@@ -823,8 +827,9 @@ class MainActivity : Activity() {
               }
               const text = $safeText;
               if (isEditable) {
+                // Never append to editor text as a fallback: that corrupts files when Select All failed.
                 const inserted = document.execCommand('insertText', false, text);
-                if (!inserted) el.textContent = (el.textContent || '') + text;
+                if (!inserted) return JSON.stringify({ok:false,error:'editor_insertText_failed_selection_preserved'});
               } else {
                 const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
                 const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
