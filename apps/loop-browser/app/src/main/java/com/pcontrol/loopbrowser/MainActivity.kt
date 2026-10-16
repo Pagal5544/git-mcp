@@ -724,21 +724,26 @@ class MainActivity : Activity() {
             (function() {
               const active = document.activeElement;
               if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
-              // Code editors such as GitHub's CodeMirror use a contenteditable editor root.
-              const editableRoot = active.closest && active.closest('[contenteditable="true"],[role="textbox"]');
-              const el = editableRoot || active;
-              if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
-                  typeof el.select === 'function' && !el.disabled && !el.readOnly) {
-                el.focus(); el.select();
-                return JSON.stringify({ok:true,length:(el.value || '').length,kind:'form-control'});
+              const closest = (node, selector) => node && node.closest ? node.closest(selector) : null;
+              const root = closest(active, '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor');
+              const el = root || active;
+              const input = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el :
+                (root && root.querySelector ? root.querySelector('textarea,input') : null);
+              if (input && typeof input.select === 'function' && !input.disabled && !input.readOnly) {
+                input.focus(); input.select();
+                return JSON.stringify({ok:true,length:(input.value || '').length,kind:'form-control'});
               }
-              if (el.isContentEditable || (el.getAttribute && el.getAttribute('role') === 'textbox')) {
-                el.focus();
-                const range = document.createRange(); range.selectNodeContents(el);
-                const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-                return JSON.stringify({ok:true,length:selection.toString().length,kind:'contenteditable'});
+              const editable = el.isContentEditable ? el :
+                (root && root.querySelector ? root.querySelector('[contenteditable="true"],.cm-content') : null);
+              if (editable && (editable.isContentEditable || editable.getAttribute('role') === 'textbox')) {
+                editable.focus();
+                const selection = window.getSelection();
+                const range = document.createRange(); range.selectNodeContents(editable);
+                selection.removeAllRanges(); selection.addRange(range);
+                const length = selection.toString().length;
+                return JSON.stringify({ok:length > 0,length,kind:'contenteditable',error:length ? '' : 'empty_editor'});
               }
-              return JSON.stringify({ok:false,error:'focus_an_editable_field_first'});
+              return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : ''});
             })()
         """.trimIndent()
         browser.evaluateJavascript(script) { raw -> handleSelectionResult("select_all", raw) }
@@ -814,20 +819,25 @@ class MainActivity : Activity() {
         val safeText = JSONObject.quote(text)
         val script = """
             (function() {
-              const el = document.activeElement;
-              if (!el || el.disabled || el.readOnly) {
-                return JSON.stringify({ok:false,error:'no_editable_focused_element'});
+              const active = document.activeElement;
+              if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
+              const root = active.closest ? active.closest('[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor') : null;
+              let el = active;
+              if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && root) {
+                const content = root.querySelector('[contenteditable="true"],.cm-content');
+                const hiddenInput = root.querySelector('textarea,input');
+                el = content || (active.isContentEditable ? active : hiddenInput) || root;
               }
+              if (!el || el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'no_editable_focused_element',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : ''});
               const isInput = el instanceof HTMLInputElement &&
                 !['button','submit','reset','checkbox','radio','file','hidden','image'].includes(el.type);
               const isTextArea = el instanceof HTMLTextAreaElement;
-              const isEditable = el.isContentEditable;
-              if (!(isInput || isTextArea || isEditable)) {
-                return JSON.stringify({ok:false,error:'focus_an_editable_field_first'});
-              }
+              const isEditable = el.isContentEditable || (el.getAttribute && el.getAttribute('role') === 'textbox');
+              if (!(isInput || isTextArea || isEditable)) return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : ''});
+              el.focus();
               const text = $safeText;
               if (isEditable) {
-                // Never append to editor text as a fallback: that corrupts files when Select All failed.
+                // Insert at the editor's real selection; never append as a fallback.
                 const inserted = document.execCommand('insertText', false, text);
                 if (!inserted) return JSON.stringify({ok:false,error:'editor_insertText_failed_selection_preserved'});
               } else {
