@@ -998,9 +998,14 @@ class MainActivity : Activity() {
     }
 
     private fun applyDesktopViewport(view: WebView) {
-        // Force responsive pages to recalculate at a desktop CSS width, not the phone width.
-        val script = "(function(){var d=document;var m=d.querySelector('meta[name=\"viewport\"]');if(!m){m=d.createElement('meta');m.name='viewport';d.head.appendChild(m);}m.setAttribute('content','width=1280, initial-scale=1.0');d.documentElement.style.minWidth='1280px';if(d.body)d.body.style.minWidth='1280px';window.dispatchEvent(new Event('resize'));return {viewport:m.content,width:document.documentElement.clientWidth};})()"
-        view.evaluateJavascript(script, null)
+        // Request a desktop CSS layout, then scale the 1280px layout down to the phone viewport.
+        val script = "(function(){var d=document;var m=d.querySelector('meta[name=\"viewport\"]');if(!m){m=d.createElement('meta');m.name='viewport';d.head.appendChild(m);}m.setAttribute('content','width=1280');window.dispatchEvent(new Event('resize'));return document.documentElement.clientWidth;})()"
+        view.evaluateJavascript(script) { result ->
+            if (desktopMode && view.width > 0) {
+                val fitPercent = ((view.width.toFloat() / 1280f) * 100f).toInt().coerceIn(25, 100)
+                view.setInitialScale(fitPercent)
+            }
+        }
     }
 
     private fun toggleDesktopMode() {
