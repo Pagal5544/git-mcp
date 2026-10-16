@@ -52,6 +52,11 @@ class MainActivity : Activity() {
     private val loopHandler = Handler(Looper.getMainLooper())
     private var loopRunning = false
     @Volatile private var pageLoading = false
+    @Volatile private var cachedBrowserUrl: String = ""
+    @Volatile private var cachedBrowserTitle: String = ""
+    @Volatile private var cachedBrowserWidth: Int = 0
+    @Volatile private var cachedBrowserHeight: Int = 0
+    @Volatile private var cachedCanGoBack: Boolean = false
     private var bridgeStatus: TextView? = null
     private var browserBridge: BrowserBridge? = null
     private var loopStep = 0
@@ -311,6 +316,11 @@ class MainActivity : Activity() {
                 view: WebView?, request: WebResourceRequest?
             ): Boolean = false
             override fun onPageFinished(view: WebView?, url: String?) {
+                cachedBrowserUrl = url.orEmpty()
+                cachedBrowserTitle = view?.title.orEmpty()
+                cachedBrowserWidth = view?.width ?: 0
+                cachedBrowserHeight = view?.height ?: 0
+                cachedCanGoBack = view?.canGoBack() ?: false
                 address.setText(url.orEmpty())
                 status.text = "Ready • " + url.orEmpty()
             }
