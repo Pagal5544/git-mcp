@@ -725,7 +725,10 @@ class MainActivity : Activity() {
               const active = document.activeElement;
               if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
               const closest = (node, selector) => node && node.closest ? node.closest(selector) : null;
-              const root = closest(active, '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor');
+              let root = closest(active, '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]');
+              if (!root && /github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname)) {
+                root = document.querySelector('.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]');
+              }
               const el = root || active;
               const input = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el :
                 (root && root.querySelector ? root.querySelector('textarea,input') : null);
@@ -821,10 +824,17 @@ class MainActivity : Activity() {
             (function() {
               const active = document.activeElement;
               if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
-              const root = active.closest ? active.closest('[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor') : null;
+              const editorSelector = '.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]';
+              const editableSelector = '[contenteditable="true"],[role="textbox"],.cm-content,textarea.js-code-editor-input';
+              let root = active.closest ? active.closest('[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]') : null;
+              // GitHub's editor may leave document.activeElement on BODY even after a viewport tap.
+              // Only use a recognized code-editor surface as a fallback; never type into arbitrary page text.
+              if (!root && /github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname)) {
+                root = document.querySelector(editorSelector);
+              }
               let el = active;
               if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && root) {
-                const content = root.querySelector('[contenteditable="true"],.cm-content');
+                const content = root.matches && root.matches(editableSelector) ? root : root.querySelector(editableSelector);
                 const hiddenInput = root.querySelector('textarea,input');
                 el = content || (active.isContentEditable ? active : hiddenInput) || root;
               }
