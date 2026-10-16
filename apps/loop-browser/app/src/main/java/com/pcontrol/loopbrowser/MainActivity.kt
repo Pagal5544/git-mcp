@@ -50,7 +50,8 @@ class MainActivity : Activity() {
     private var desktopMode = false
     private var mobileUserAgent: String = ""
     private val loopHandler = Handler(Looper.getMainLooper())
-    private var loopRunning = false
+    @Volatile private var loopRunning = false
+    private var observeAutoStarted = false
     @Volatile private var pageLoading = false
     @Volatile private var cachedBrowserUrl: String = ""
     @Volatile private var cachedBrowserTitle: String = ""
@@ -323,6 +324,11 @@ class MainActivity : Activity() {
                 cachedCanGoBack = view?.canGoBack() ?: false
                 address.setText(url.orEmpty())
                 status.text = "Ready • " + url.orEmpty()
+                // Start observing automatically on the first completed page; no manual tap needed.
+                if (!observeAutoStarted) {
+                    observeAutoStarted = true
+                    startObserveLoop("page-finished")
+                }
             }
         }
     }
@@ -381,12 +387,8 @@ class MainActivity : Activity() {
                     "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
                     "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
                     "POST /v1/browser/capture" -> captureViewportForBridge()
-                    "POST /v1/browser/stop" -> {
-                        loopRunning = false
-                        loopHandler.removeCallbacksAndMessages(null)
-                        if (::loopButton.isInitialized) loopButton.text = "Start Observe Loop"
-                        if (::status.isInitialized) status.text = "Observe loop stopped by MCP"
-                    }
+                    "POST /v1/browser/start" -> startObserveLoop("mcp")
+                    "POST /v1/browser/stop" -> stopObserveLoop("MCP")
                 }
             } catch (e: Exception) {
                 android.util.Log.e("LoopBrowserBridge", "Queued action failed: $route", e)
@@ -465,17 +467,29 @@ class MainActivity : Activity() {
     }
 
     private fun toggleObserveLoop() {
-        loopRunning = !loopRunning
-        loopButton.text = if (loopRunning) "Stop Loop" else "Start Loop"
-        status.visibility = if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
-        if (loopRunning) {
-            loopStep = 0
-            status.text = "Observe loop started • 5-second interval"
-            observeAndAct(true)
-        } else {
-            loopHandler.removeCallbacksAndMessages(null)
-            status.text = "Observe loop stopped"
-            status.visibility = if (automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+        if (loopRunning) stopObserveLoop("user") else startObserveLoop("user")
+    }
+
+    private fun startObserveLoop(source: String) {
+        if (isFinishing || !::browser.isInitialized) return
+        if (loopRunning) return
+        loopRunning = true
+        if (::loopButton.isInitialized) loopButton.text = "Stop Loop"
+        if (::status.isInitialized) {
+            status.visibility = View.VISIBLE
+            status.text = "Observe loop started • source=$source • 5-second interval"
+        }
+        loopStep = 0
+        observeAndAct(true)
+    }
+
+    private fun stopObserveLoop(source: String) {
+        loopRunning = false
+        loopHandler.removeCallbacksAndMessages(null)
+        if (::loopButton.isInitialized) loopButton.text = "Start Observe Loop"
+        if (::status.isInitialized) {
+            status.text = "Observe loop stopped • source=$source"
+            status.visibility = if (::automationPanel.isInitialized && automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         }
     }
 
