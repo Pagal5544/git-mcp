@@ -319,7 +319,6 @@ class MainActivity : Activity() {
 
     private fun startBrowserBridge() {
         browserBridge = BrowserBridge(
-            tokenProvider = { "" },
             actionHandler = { route, payload -> handleBrowserBridgeAction(route, payload) },
             statusHandler = { message ->
                 runOnUiThread {
