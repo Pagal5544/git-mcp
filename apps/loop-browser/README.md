@@ -626,3 +626,24 @@ Before reporting completion:
 - [ ] README status updated with evidence and limitations.
 
 **Golden rule:** inspect first, change one thing at a time, build on GitHub Actions, test through Termux MCP, and report only what the evidence proves.
+
+
+## Browser zoom controls
+
+The collapsible Tools panel contains Zoom minus, Zoom plus, and Reset zoom. These change the WebView page scale without MacroDroid or external automation.
+
+- POST /v1/browser/zoom JSON {"action":"in"} zooms in.
+- POST /v1/browser/zoom JSON {"action":"out"} zooms out.
+- POST /v1/browser/zoom JSON {"action":"reset"} returns to 100%.
+- POST /v1/browser/zoom JSON {"action":"set","factor":1.5} requests 150% zoom; supported factor range is 0.5..3.0.
+- GET /v1/browser/state reports the tracked zoomFactor.
+
+Example:
+```sh
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/zoom -H 'Content-Type: application/json' -d '{"action":"in"}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/zoom -H 'Content-Type: application/json' -d '{"action":"out"}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/zoom -H 'Content-Type: application/json' -d '{"action":"reset"}'
+curl -sS http://127.0.0.1:8789/v1/browser/state
+```
+
+Zoom can make wide desktop pages easier to inspect, but it does not itself guarantee horizontal scrolling; verify the page's actual scrollable area with fresh screenshots.

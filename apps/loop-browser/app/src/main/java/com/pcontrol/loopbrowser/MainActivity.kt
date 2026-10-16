@@ -50,6 +50,7 @@ class MainActivity : Activity() {
     private var stripHidden = false
     private var fullscreenMode = false
     private var desktopMode = false
+    @Volatile private var browserZoomFactor = 1.0f
     private var mobileUserAgent: String = ""
     private val loopHandler = Handler(Looper.getMainLooper())
     @Volatile private var loopRunning = false
@@ -212,6 +213,26 @@ class MainActivity : Activity() {
         }
         automationPanel.addView(selectorInput)
 
+        val zoomActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        fun addZoomAction(label: String, action: () -> Unit) {
+            zoomActions.addView(Button(this).apply {
+                text = label
+                isAllCaps = false
+                minHeight = 40.dp()
+                layoutParams = LinearLayout.LayoutParams(0, 40.dp(), 1f).apply {
+                    marginEnd = 4.dp()
+                }
+                setOnClickListener { action() }
+            })
+        }
+        addZoomAction("Zoom −") { changeBrowserZoom("out") }
+        addZoomAction("Zoom +") { changeBrowserZoom("in") }
+        addZoomAction("Reset zoom") { changeBrowserZoom("reset") }
+        automationPanel.addView(zoomActions)
+
         bridgeStatus = TextView(this).apply {
             textSize = 11f
             maxLines = 2
@@ -313,6 +334,9 @@ class MainActivity : Activity() {
     private fun configureBrowser() {
         browser.settings.apply {
             javaScriptEnabled = true
+            setSupportZoom(true)
+            builtInZoomControls = false
+            displayZoomControls = false
             domStorageEnabled = true
             allowFileAccess = false
             allowContentAccess = false
@@ -446,6 +470,16 @@ class MainActivity : Activity() {
             lastAgentActionAt = System.currentTimeMillis()
         }
 
+        if (route == "POST /v1/browser/zoom") {
+            val action = payload.optString("action", "").lowercase()
+            val factor = payload.optDouble("factor", 1.1).toFloat()
+            if (action !in setOf("in", "out", "reset", "set") ||
+                (action == "set" && (!factor.isFinite() || factor !in 0.5f..3.0f))) {
+                return JSONObject().put("ok", false)
+                    .put("error", "zoom action must be in/out/reset or set with factor 0.5..3.0")
+            }
+        }
+
         if (route == "POST /v1/browser/type") {
             val text = payload.optString("text", "")
             if (!payload.has("text") || text.length > 4000) {
@@ -497,6 +531,7 @@ class MainActivity : Activity() {
                 .put("navigationFinishedAt", cachedNavigationFinishedAt)
                 .put("navigationTimeoutMs", navigationTimeoutMs)
                 .put("desktopMode", desktopMode)
+                .put("zoomFactor", browserZoomFactor.toDouble())
                 .put("observeLoopRunning", loopRunning)
                 .put("canGoBack", cachedCanGoBack)
                 .put("canGoForward", cachedCanGoForward)
@@ -535,6 +570,10 @@ class MainActivity : Activity() {
             try {
                 when (route) {
                     "POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
+                    "POST /v1/browser/zoom" -> changeBrowserZoom(
+                        payload.optString("action", "").lowercase(),
+                        payload.optDouble("factor", 1.1).toFloat()
+                    )
                     "POST /v1/browser/tap" -> {
                         val x = payload.optInt("x")
                         val y = payload.optInt("y")
@@ -918,6 +957,40 @@ class MainActivity : Activity() {
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.hideSoftInputFromWindow(address.windowToken, 0)
         }
+    }
+
+    private fun changeBrowserZoom(action: String, requestedFactor: Float = 1.1f) {
+        if (!::browser.isInitialized) return
+        when (action) {
+            "in" -> {
+                if (browserZoomFactor < 3.0f) {
+                    browser.zoomIn()
+                    browserZoomFactor = (browserZoomFactor * 1.1f).coerceAtMost(3.0f)
+                }
+            }
+            "out" -> {
+                if (browserZoomFactor > 0.5f) {
+                    browser.zoomOut()
+                    browserZoomFactor = (browserZoomFactor / 1.1f).coerceAtLeast(0.5f)
+                }
+            }
+            "reset" -> {
+                val ratio = 1.0f / browserZoomFactor
+                if (ratio.isFinite() && ratio > 0f) browser.zoomBy(ratio)
+                browserZoomFactor = 1.0f
+            }
+            "set" -> {
+                val target = requestedFactor.coerceIn(0.5f, 3.0f)
+                val ratio = target / browserZoomFactor
+                if (ratio.isFinite() && ratio > 0f) browser.zoomBy(ratio)
+                browserZoomFactor = target
+            }
+            else -> return
+        }
+        lastAgentAction = "zoom_" + action
+        lastAgentActionStatus = "dispatched"
+        lastAgentActionAt = System.currentTimeMillis()
+        status.text = "Browser zoom: " + (browserZoomFactor * 100).toInt() + "%"
     }
 
     private fun toggleDesktopMode() {
