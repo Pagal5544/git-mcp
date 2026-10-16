@@ -70,6 +70,10 @@ class MainActivity : Activity() {
     private var bridgeStatus: TextView? = null
     private var browserBridge: BrowserBridge? = null
     private var loopStep = 0
+    @Volatile private var lastAgentAction = "none"
+    @Volatile private var lastAgentActionStatus = "idle"
+    @Volatile private var lastAgentActionAt = 0L
+    private val allowedAgentActions = setOf("observe", "navigate", "back", "forward", "reload", "capture", "desktop_on", "desktop_off", "stop")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -417,6 +421,29 @@ class MainActivity : Activity() {
             }
         }
 
+        // The agent endpoint accepts exactly one allowlisted action per request.
+        // It deliberately has no arbitrary JavaScript, CSS-click, shell, or batch-action mode.
+        if (route == "POST /v1/browser/agent/step") {
+            val action = payload.optString("action", "").trim().lowercase()
+            if (action !in allowedAgentActions) {
+                return JSONObject().put("ok", false)
+                    .put("error", "Unsupported agent action; allowed: " + allowedAgentActions.sorted().joinToString(","))
+            }
+            if (action == "navigate") {
+                val raw = payload.optString("url", "").trim()
+                val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
+                val scheme = uri?.scheme?.lowercase()
+                if (raw.isBlank() || raw.any { it.isWhitespace() } ||
+                    (scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
+                    return JSONObject().put("ok", false)
+                        .put("error", "navigate requires an absolute HTTP/HTTPS URL with a host")
+                }
+            }
+            lastAgentAction = action
+            lastAgentActionStatus = "queued"
+            lastAgentActionAt = System.currentTimeMillis()
+        }
+
         // State polling is served from a volatile snapshot and never waits for the UI thread.
         if (route == "GET /v1/browser/state") {
             return JSONObject().put("ok", true)
@@ -439,6 +466,9 @@ class MainActivity : Activity() {
                 .put("lastCaptureOk", latestCaptureOk)
                 .put("lastCaptureFile", latestCaptureFileName)
                 .put("lastCaptureTimestamp", latestCaptureTimestamp)
+                .put("agentLastAction", lastAgentAction)
+                .put("agentLastActionStatus", lastAgentActionStatus)
+                .put("agentLastActionAt", lastAgentActionAt)
                 .put("timestamp", System.currentTimeMillis())
         }
 
@@ -489,6 +519,42 @@ class MainActivity : Activity() {
                     }
                     "POST /v1/browser/start" -> startObserveLoop("mcp")
                     "POST /v1/browser/stop" -> stopObserveLoop("MCP")
+                    "POST /v1/browser/agent/step" -> {
+                        val action = payload.optString("action", "").trim().lowercase()
+                        when (action) {
+                            "observe" -> {
+                                lastAgentActionStatus = "completed"
+                                status.text = "Agent observed current page • " + browser.title.orEmpty()
+                            }
+                            "navigate" -> navigate(payload.optString("url", "").trim()).also {
+                                lastAgentActionStatus = "executed"
+                            }
+                            "back" -> {
+                                if (browser.canGoBack()) { browser.goBack(); lastAgentActionStatus = "executed" }
+                                else lastAgentActionStatus = "rejected_no_history"
+                            }
+                            "forward" -> {
+                                if (browser.canGoForward()) { browser.goForward(); lastAgentActionStatus = "executed" }
+                                else lastAgentActionStatus = "rejected_no_forward_history"
+                            }
+                            "reload" -> { browser.reload(); lastAgentActionStatus = "executed" }
+                            "capture" -> {
+                                val capture = captureViewportForBridge()
+                                latestCaptureFileName = capture?.name.orEmpty()
+                                latestCaptureOk = capture != null
+                                latestCaptureTimestamp = System.currentTimeMillis()
+                                lastAgentActionStatus = if (capture != null) "completed" else "failed_capture"
+                            }
+                            "desktop_on", "desktop_off" -> {
+                                val requested = action == "desktop_on"
+                                if (desktopMode != requested) toggleDesktopMode()
+                                lastAgentActionStatus = "executed"
+                            }
+                            "stop" -> { stopObserveLoop("agent"); lastAgentActionStatus = "completed" }
+                        }
+                        lastAgentActionAt = System.currentTimeMillis()
+                        android.util.Log.i("LoopBrowserBridge", "Agent step: action=$action status=$lastAgentActionStatus")
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("LoopBrowserBridge", "Queued action failed: $route", e)

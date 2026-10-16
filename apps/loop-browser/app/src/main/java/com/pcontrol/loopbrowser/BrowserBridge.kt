@@ -94,7 +94,7 @@ class BrowserBridge(
                     "POST /v1/browser/navigate", "POST /v1/browser/back",
                     "POST /v1/browser/forward", "POST /v1/browser/desktop",
                     "POST /v1/browser/reload", "POST /v1/browser/capture",
-                    "POST /v1/browser/start", "POST /v1/browser/stop"
+                    "POST /v1/browser/start", "POST /v1/browser/stop", "POST /v1/browser/agent/step"
                 )
                 if (key !in allowed) return respond(client, 404, JSONObject().put("error", "not found"))
                 // Health is deliberately independent of the Activity/UI thread.
