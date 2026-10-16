@@ -450,7 +450,8 @@ class MainActivity : Activity() {
         // it is queued on the UI thread. This prevents an old loading timestamp from
         // making the new request appear timed out while it is still waiting in the queue.
         if (route == "POST /v1/browser/navigate" || route == "POST /v1/browser/reload" ||
-            route == "POST /v1/browser/back" || route == "POST /v1/browser/forward") {
+            route == "POST /v1/browser/back" || route == "POST /v1/browser/forward" ||
+            route == "POST /v1/browser/desktop") {
             cachedNavigationStatus = "queued"
             cachedNavigationError = ""
             cachedNavigationStartedAt = 0L
@@ -466,6 +467,14 @@ class MainActivity : Activity() {
                     "POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
                     "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
                     "POST /v1/browser/forward" -> if (::browser.isInitialized && browser.canGoForward()) browser.goForward()
+                    "POST /v1/browser/desktop" -> {
+                        val requested = payload.opt("enabled")
+                        if (requested !is Boolean) {
+                            android.util.Log.w("LoopBrowserBridge", "Desktop toggle requires boolean enabled")
+                        } else if (desktopMode != requested) {
+                            toggleDesktopMode()
+                        }
+                    }
                     "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
                     "POST /v1/browser/capture" -> {
                         val capture = captureViewportForBridge()
