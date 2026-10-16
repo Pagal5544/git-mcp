@@ -339,6 +339,7 @@ class MainActivity : Activity() {
     private fun startBrowserBridge() {
         browserBridge = BrowserBridge(
             actionHandler = { route, payload -> handleBrowserBridgeAction(route, payload) },
+            screenshotHandler = { readLatestScreenshotForBridge() },
             statusHandler = { message ->
                 runOnUiThread {
                     bridgeStatus?.text = message
@@ -350,6 +351,22 @@ class MainActivity : Activity() {
         ).also { bridge ->
             bridgeStatus?.text = "Starting MCP listener…"
             bridge.start()
+        }
+    }
+
+    private fun readLatestScreenshotForBridge(): ByteArray? {
+        if (latestCaptureFileName.isBlank() || !latestCaptureOk) return null
+        return try {
+            val folder = File(getExternalFilesDir(null), "captures").canonicalFile
+            val file = File(folder, latestCaptureFileName).canonicalFile
+            if (file.parentFile != folder || !file.isFile || file.length() !in 1..4_194_304L) {
+                null
+            } else {
+                file.readBytes()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("LoopBrowserBridge", "Unable to read latest screenshot", e)
+            null
         }
     }
 

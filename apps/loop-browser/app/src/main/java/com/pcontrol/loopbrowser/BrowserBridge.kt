@@ -14,6 +14,7 @@ import java.util.concurrent.Executors
  */
 class BrowserBridge(
     private val actionHandler: (String, JSONObject) -> JSONObject,
+    private val screenshotHandler: () -> ByteArray? = { null },
     private val statusHandler: (String) -> Unit = {}
 ) {
     @Volatile private var server: ServerSocket? = null
@@ -89,7 +90,7 @@ class BrowserBridge(
                 val route = first[1].substringBefore("?")
                 val key = first[0] + " " + route
                 val allowed = setOf(
-                    "GET /health", "GET /v1/browser/state",
+                    "GET /health", "GET /v1/browser/state", "GET /v1/browser/screenshot",
                     "POST /v1/browser/navigate", "POST /v1/browser/back",
                     "POST /v1/browser/reload", "POST /v1/browser/capture",
                     "POST /v1/browser/start", "POST /v1/browser/stop"
@@ -97,6 +98,13 @@ class BrowserBridge(
                 if (key !in allowed) return respond(client, 404, JSONObject().put("error", "not found"))
                 // Health is deliberately independent of the Activity/UI thread.
                 // This lets Termux diagnose the listener even when the Activity is backgrounded.
+                if (key == "GET /v1/browser/screenshot") {
+                    val png = screenshotHandler()
+                    if (png == null || png.isEmpty()) {
+                        return respond(client, 404, JSONObject().put("ok", false).put("error", "no screenshot available"))
+                    }
+                    return respondImage(client, png)
+                }
                 val result = if (key == "GET /health") {
                     JSONObject().put("ok", true).put("bridge", "loop-browser")
                         .put("version", 1).put("running", running)
@@ -109,6 +117,18 @@ class BrowserBridge(
                 try { respond(client, 500, JSONObject().put("error", "bridge request failed")) } catch (_: Exception) { }
             }
         }
+    }
+
+
+    private fun respondImage(socket: Socket, png: ByteArray) {
+        val header = "HTTP/1.1 200 OK" +
+            "\r\nContent-Type: image/png" +
+            "\r\nContent-Length: " + png.size +
+            "\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n"
+        val output = BufferedOutputStream(socket.getOutputStream())
+        output.write(header.toByteArray(Charsets.UTF_8))
+        output.write(png)
+        output.flush()
     }
 
     private fun respond(socket: Socket, code: Int, json: JSONObject) {
