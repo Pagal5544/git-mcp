@@ -345,7 +345,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleBrowserBridgeAction(route: String, payload: JSONObject): JSONObject {
-        // Read-only state polling uses a thread-safe snapshot and never blocks on WebView/UI.
+        // State polling is served from a volatile snapshot and never waits for the UI thread.
         if (route == "GET /v1/browser/state") {
             return JSONObject().put("ok", true)
                 .put("url", cachedBrowserUrl)
@@ -358,74 +358,42 @@ class MainActivity : Activity() {
                 .put("viewportHeight", cachedBrowserHeight)
                 .put("timestamp", System.currentTimeMillis())
         }
-        android.util.Log.i("LoopBrowserBridge", "Dispatching UI action: $route")
-        val answer = arrayOf(JSONObject().put("ok", false).put("error", "action timeout"))
-        val latch = CountDownLatch(1)
+
+        if (route == "GET /health") {
+            return JSONObject().put("ok", true).put("bridge", "loop-browser")
+                .put("version", 1).put("ready", !isFinishing)
+        }
+
+        // Do not block the socket worker waiting on Android's main thread. WebView can
+        // be busy loading/rendering; queue the operation and acknowledge the request.
         runOnUiThread {
             try {
-                answer[0] = when (route) {
-                    "GET /health" -> JSONObject()
-                        .put("ok", true).put("bridge", "loop-browser").put("version", 1)
-                        .put("ready", ::browser.isInitialized && !isFinishing)
-                    "GET /v1/browser/state" -> JSONObject()
-                        .put("ok", true)
-                        .put("url", browser.url.orEmpty())
-                        .put("title", browser.title.orEmpty())
-                        .put("loading", pageLoading)
-                        .put("desktopMode", desktopMode)
-                        .put("observeLoopRunning", loopRunning)
-                        .put("canGoBack", browser.canGoBack())
-                        .put("viewportWidth", browser.width)
-                        .put("viewportHeight", browser.height)
-                        .put("timestamp", System.currentTimeMillis())
+                when (route) {
                     "POST /v1/browser/navigate" -> {
                         val raw = payload.optString("url", "").trim()
                         val uri = android.net.Uri.parse(raw)
-                        if (raw.isBlank() || (uri.scheme != "http" && uri.scheme != "https") || uri.host.isNullOrBlank()) {
-                            JSONObject().put("ok", false).put("error", "Only valid HTTP/HTTPS URLs are accepted")
-                        } else {
+                        if (raw.isNotBlank() && (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()) {
                             navigate(raw)
-                            JSONObject().put("ok", true).put("accepted", true).put("url", raw)
+                        } else {
+                            status.text = "MCP rejected invalid URL"
                         }
                     }
-                    "POST /v1/browser/back" -> {
-                        if (browser.canGoBack()) {
-                            browser.goBack()
-                            JSONObject().put("ok", true).put("performed", true)
-                        } else JSONObject().put("ok", true).put("performed", false).put("reason", "no history")
-                    }
-                    "POST /v1/browser/reload" -> {
-                        browser.reload()
-                        JSONObject().put("ok", true).put("performed", true)
-                    }
-                    "POST /v1/browser/capture" -> {
-                        val output = captureViewportForBridge()
-                        if (output == null) JSONObject().put("ok", false).put("error", "Capture failed or page not ready")
-                        else JSONObject().put("ok", true).put("captureId", output.name)
-                            .put("timestamp", System.currentTimeMillis())
-                            .put("width", browser.width).put("height", browser.height)
-                    }
+                    "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
+                    "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
+                    "POST /v1/browser/capture" -> captureViewportForBridge()
                     "POST /v1/browser/stop" -> {
                         loopRunning = false
                         loopHandler.removeCallbacksAndMessages(null)
                         if (::loopButton.isInitialized) loopButton.text = "Start Observe Loop"
-                        status.text = "Observe loop stopped by MCP"
-                        JSONObject().put("ok", true).put("loopRunning", false)
+                        if (::status.isInitialized) status.text = "Observe loop stopped by MCP"
                     }
-                    else -> JSONObject().put("ok", false).put("error", "Unsupported action")
                 }
             } catch (e: Exception) {
-                answer[0] = JSONObject().put("ok", false).put("error", e.javaClass.simpleName)
-            } finally {
-                latch.countDown()
+                android.util.Log.e("LoopBrowserBridge", "Queued action failed: $route", e)
             }
         }
-        if (!latch.await(5, TimeUnit.SECONDS)) {
-            android.util.Log.e("LoopBrowserBridge", "UI action timed out: $route; Activity main thread did not complete it")
-            return JSONObject().put("ok", false).put("error", "UI action timed out")
-        }
-        android.util.Log.i("LoopBrowserBridge", "Completed UI action: $route")
-        return answer[0]
+        return JSONObject().put("ok", true).put("accepted", true)
+            .put("queued", true).put("action", route)
     }
 
     private fun captureViewportForBridge(): File? {
