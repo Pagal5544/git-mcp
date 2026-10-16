@@ -1133,11 +1133,7 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Only HTTP/HTTPS pages are supported", Toast.LENGTH_SHORT).show()
             return
         }
-        if (isGoogleAccountSignInUrl(uri)) {
-            openGoogleSignInInSecureBrowser(uri)
-        } else {
-            browser.loadUrl(candidate)
-        }
+        browser.loadUrl(candidate)
     }
 
     private fun captureViewport() {
