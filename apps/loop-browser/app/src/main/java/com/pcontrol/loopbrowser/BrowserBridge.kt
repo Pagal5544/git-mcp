@@ -91,7 +91,7 @@ class BrowserBridge(
                 val key = first[0] + " " + route
                 val allowed = setOf(
                     "GET /health", "GET /v1/browser/state", "GET /v1/browser/screenshot",
-                    "POST /v1/browser/navigate", "POST /v1/browser/back",
+                    "POST /v1/browser/navigate", "POST /v1/browser/tap", "POST /v1/browser/swipe", "POST /v1/browser/scroll", "POST /v1/browser/back",
                     "POST /v1/browser/forward", "POST /v1/browser/desktop",
                     "POST /v1/browser/reload", "POST /v1/browser/capture",
                     "POST /v1/browser/start", "POST /v1/browser/stop", "POST /v1/browser/agent/step"

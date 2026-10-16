@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.MotionEvent
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
@@ -444,6 +446,30 @@ class MainActivity : Activity() {
             lastAgentActionAt = System.currentTimeMillis()
         }
 
+        // Validate touch actions against the WebView viewport before queuing them.
+        if (route == "POST /v1/browser/tap") {
+            if (!payload.has("x") || !payload.has("y") ||
+                !validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
+                return JSONObject().put("ok", false).put("error", "tap requires x,y inside the WebView viewport")
+            }
+        }
+        if (route == "POST /v1/browser/swipe") {
+            val duration = payload.optLong("durationMs", 350L)
+            if (!payload.has("x1") || !payload.has("y1") || !payload.has("x2") || !payload.has("y2") ||
+                !validTouchPoint(payload.optInt("x1", -1), payload.optInt("y1", -1)) ||
+                !validTouchPoint(payload.optInt("x2", -1), payload.optInt("y2", -1)) ||
+                duration !in 80L..2000L) {
+                return JSONObject().put("ok", false).put("error", "swipe requires valid viewport coordinates and durationMs 80..2000")
+            }
+        }
+        if (route == "POST /v1/browser/scroll") {
+            val direction = payload.optString("direction", "").lowercase()
+            val amount = payload.optInt("amount", 500)
+            if (direction !in setOf("up", "down") || amount !in 80..1200) {
+                return JSONObject().put("ok", false).put("error", "scroll requires direction up/down and amount 80..1200")
+            }
+        }
+
         // State polling is served from a volatile snapshot and never waits for the UI thread.
         if (route == "GET /v1/browser/state") {
             return JSONObject().put("ok", true)
@@ -496,6 +522,25 @@ class MainActivity : Activity() {
             try {
                 when (route) {
                     "POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
+                    "POST /v1/browser/tap" -> {
+                        val x = payload.optInt("x")
+                        val y = payload.optInt("y")
+                        performTouchGesture(x, y, x, y, 80L)
+                    }
+                    "POST /v1/browser/swipe" -> performTouchGesture(
+                        payload.optInt("x1"), payload.optInt("y1"),
+                        payload.optInt("x2"), payload.optInt("y2"),
+                        payload.optLong("durationMs", 350L)
+                    )
+                    "POST /v1/browser/scroll" -> {
+                        val amount = payload.optInt("amount", 500)
+                        val centerX = (browser.width / 2).coerceAtLeast(1)
+                        val startY = if (payload.optString("direction").lowercase() == "down")
+                            (browser.height * 3 / 4).coerceAtLeast(1) else (browser.height / 4).coerceAtLeast(1)
+                        val endY = if (payload.optString("direction").lowercase() == "down")
+                            (startY - amount).coerceAtLeast(1) else (startY + amount).coerceAtMost(browser.height - 1)
+                        performTouchGesture(centerX, startY, centerX, endY, 350L)
+                    }
                     "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
                     "POST /v1/browser/forward" -> if (::browser.isInitialized && browser.canGoForward()) browser.goForward()
                     "POST /v1/browser/desktop" -> {
@@ -562,6 +607,48 @@ class MainActivity : Activity() {
         }
         return JSONObject().put("ok", true).put("accepted", true)
             .put("queued", true).put("action", route)
+    }
+
+    private fun validTouchPoint(x: Int, y: Int): Boolean =
+        ::browser.isInitialized && browser.width > 0 && browser.height > 0 &&
+            x >= 0 && y >= 0 && x < browser.width && y < browser.height
+
+    /** Dispatches a WebView touch sequence in viewport-local pixel coordinates. */
+    private fun performTouchGesture(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long) {
+        if (!validTouchPoint(x1, y1) || !validTouchPoint(x2, y2)) {
+            lastAgentActionStatus = "rejected_invalid_coordinates"
+            return
+        }
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x1.toFloat(), y1.toFloat(), 0)
+        browser.dispatchTouchEvent(down)
+        down.recycle()
+        val steps = if (x1 == x2 && y1 == y2) 1 else 8
+        for (step in 1 until steps) {
+            val delay = durationMs * step / steps
+            loopHandler.postDelayed({
+                if (!::browser.isInitialized || isFinishing) return@postDelayed
+                val fraction = step.toFloat() / steps.toFloat()
+                val x = x1 + ((x2 - x1) * fraction).toInt()
+                val y = y1 + ((y2 - y1) * fraction).toInt()
+                val now = SystemClock.uptimeMillis()
+                val move = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_MOVE, x.toFloat(), y.toFloat(), 0)
+                browser.dispatchTouchEvent(move)
+                move.recycle()
+            }, delay)
+        }
+        loopHandler.postDelayed({
+            if (!::browser.isInitialized || isFinishing) return@postDelayed
+            val now = SystemClock.uptimeMillis()
+            val up = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_UP, x2.toFloat(), y2.toFloat(), 0)
+            browser.dispatchTouchEvent(up)
+            up.recycle()
+            lastAgentAction = if (x1 == x2 && y1 == y2) "tap" else "swipe"
+            lastAgentActionStatus = "dispatched"
+            lastAgentActionAt = System.currentTimeMillis()
+            status.text = "Touch " + lastAgentAction + " dispatched • (" + x2 + "," + y2 + ")"
+            android.util.Log.i("LoopBrowserBridge", "Touch gesture dispatched: action=" + lastAgentAction + " from=(" + x1 + "," + y1 + ") to=(" + x2 + "," + y2 + ")")
+        }, durationMs)
     }
 
     private fun captureViewportForBridge(): File? {

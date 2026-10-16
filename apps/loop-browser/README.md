@@ -24,6 +24,22 @@ Use the Android APK Build GitHub Actions workflow in this repository. This subpr
 ## Safety
 Web content is untrusted. Future automation must use allowlisted actions, authenticated loopback-only communication, a visible stop control, action/time limits, and confirmation for sensitive operations. Never bypass CAPTCHA or access controls.
 
+## Touch interaction controls
+
+The loopback bridge now supports WebView touch gestures without an external AI/API:
+- `POST /v1/browser/tap` JSON: `{"x":500,"y":400}`
+- `POST /v1/browser/swipe` JSON: `{"x1":500,"y1":900,"x2":500,"y2":300,"durationMs":350}`
+- `POST /v1/browser/scroll` JSON: `{"direction":"down","amount":500}` (direction is page scroll direction; amount is 80..1200 pixels)
+
+Coordinates are viewport-local pixels relative to the WebView content, not the Android status bar or browser toolbar. Take a fresh screenshot before choosing coordinates. Tap/swipe coordinates are bounds-checked; swipe duration is limited to 80..2000 ms. A queued response means the gesture was accepted, not that the target responded; capture a new screenshot/state afterward to verify the result. These endpoints dispatch touch events to the existing WebView; they do not bypass site protections.
+
+Example:
+```sh
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/tap -H 'Content-Type: application/json' -d '{"x":500,"y":400}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/swipe -H 'Content-Type: application/json' -d '{"x1":500,"y1":900,"x2":500,"y2":300,"durationMs":350}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/scroll -H 'Content-Type: application/json' -d '{"direction":"down","amount":500}'
+```
+
 ## AI Action Loop prototype (Stage 2)
 
 The app exposes `POST /v1/browser/agent/step` on the loopback bridge. It accepts exactly one allowlisted action per request; it does not accept arbitrary JavaScript, CSS selectors, shell commands, or batches.
