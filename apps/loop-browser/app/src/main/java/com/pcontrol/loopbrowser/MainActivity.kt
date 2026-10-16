@@ -53,6 +53,11 @@ class MainActivity : Activity() {
     @Volatile private var loopRunning = false
     private var observeAutoStarted = false
     @Volatile private var pageLoading = false
+    @Volatile private var cachedNavigationStatus: String = "idle"
+    @Volatile private var cachedNavigationError: String = ""
+    @Volatile private var cachedNavigationStartedAt: Long = 0L
+    @Volatile private var cachedNavigationFinishedAt: Long = 0L
+    private val navigationTimeoutMs = 15000L
     @Volatile private var cachedBrowserUrl: String = ""
     @Volatile private var cachedBrowserTitle: String = ""
     @Volatile private var cachedBrowserWidth: Int = 0
@@ -319,7 +324,32 @@ class MainActivity : Activity() {
             override fun shouldOverrideUrlLoading(
                 view: WebView?, request: WebResourceRequest?
             ): Boolean = false
+
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                cachedBrowserUrl = url.orEmpty()
+                cachedBrowserTitle = view?.title.orEmpty()
+                pageLoading = true
+                cachedNavigationStatus = "started"
+                cachedNavigationError = ""
+                cachedNavigationStartedAt = System.currentTimeMillis()
+                cachedNavigationFinishedAt = 0L
+            }
+
+            override fun onReceivedError(
+                view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?
+            ) {
+                if (request?.isForMainFrame == true) {
+                    cachedNavigationStatus = "failed"
+                    cachedNavigationError = "WebView error ${error?.errorCode ?: -1}: ${error?.description ?: "unknown"}"
+                    cachedNavigationFinishedAt = System.currentTimeMillis()
+                    pageLoading = false
+                    android.util.Log.w("LoopBrowserBridge", "Main-frame navigation failed: $cachedNavigationError")
+                }
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                cachedNavigationStatus = if (cachedNavigationStatus == "failed") "failed" else "completed"
+                cachedNavigationFinishedAt = System.currentTimeMillis()
                 cachedBrowserUrl = url.orEmpty()
                 cachedBrowserTitle = view?.title.orEmpty()
                 cachedBrowserWidth = view?.width ?: 0
@@ -377,6 +407,12 @@ class MainActivity : Activity() {
                 .put("url", cachedBrowserUrl)
                 .put("title", cachedBrowserTitle)
                 .put("loading", pageLoading)
+                .put("navigationStatus", if (pageLoading && cachedNavigationStartedAt > 0L &&
+                    System.currentTimeMillis() - cachedNavigationStartedAt >= navigationTimeoutMs) "timed_out" else cachedNavigationStatus)
+                .put("navigationError", cachedNavigationError)
+                .put("navigationStartedAt", cachedNavigationStartedAt)
+                .put("navigationFinishedAt", cachedNavigationFinishedAt)
+                .put("navigationTimeoutMs", navigationTimeoutMs)
                 .put("desktopMode", desktopMode)
                 .put("observeLoopRunning", loopRunning)
                 .put("canGoBack", cachedCanGoBack)
