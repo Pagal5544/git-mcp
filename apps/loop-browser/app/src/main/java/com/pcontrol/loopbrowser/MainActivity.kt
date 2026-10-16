@@ -964,13 +964,13 @@ class MainActivity : Activity() {
         when (action) {
             "in" -> {
                 if (browserZoomFactor < 3.0f) {
-                    browser.zoomIn()
+                    browser.zoomBy(1.1f)
                     browserZoomFactor = (browserZoomFactor * 1.1f).coerceAtMost(3.0f)
                 }
             }
             "out" -> {
                 if (browserZoomFactor > 0.5f) {
-                    browser.zoomOut()
+                    browser.zoomBy(1.0f / 1.1f)
                     browserZoomFactor = (browserZoomFactor / 1.1f).coerceAtLeast(0.5f)
                 }
             }
