@@ -446,6 +446,19 @@ class MainActivity : Activity() {
             lastAgentActionAt = System.currentTimeMillis()
         }
 
+        if (route == "POST /v1/browser/type") {
+            val text = payload.optString("text", "")
+            if (!payload.has("text") || text.length > 4000) {
+                return JSONObject().put("ok", false).put("error", "type requires text of at most 4000 characters")
+            }
+        }
+        if (route == "POST /v1/browser/select") {
+            if (!payload.has("x") || !payload.has("y") ||
+                !validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
+                return JSONObject().put("ok", false).put("error", "select requires x,y inside the WebView viewport")
+            }
+        }
+
         // Validate touch actions against the WebView viewport before queuing them.
         if (route == "POST /v1/browser/tap") {
             if (!payload.has("x") || !payload.has("y") ||
@@ -527,6 +540,24 @@ class MainActivity : Activity() {
                         val y = payload.optInt("y")
                         performTouchGesture(x, y, x, y, 80L)
                     }
+                    "POST /v1/browser/type" -> typeIntoFocusedElement(payload.optString("text", ""))
+                    "POST /v1/browser/select" -> selectWordAt(payload.optInt("x"), payload.optInt("y"))
+                    "POST /v1/browser/select_all" -> selectAllInFocusedElement()
+                    "POST /v1/browser/copy" -> copyCurrentSelection()
+                    "POST /v1/browser/paste" -> {
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clipText = if (clipboard.hasPrimaryClip() && clipboard.primaryClipDescription?.hasMimeType("text/plain") == true) {
+                            clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+                        } else ""
+                        if (clipText.isEmpty()) {
+                            lastAgentAction = "paste"
+                            lastAgentActionStatus = "rejected_empty_clipboard"
+                            lastAgentActionAt = System.currentTimeMillis()
+                            status.text = "Paste skipped • clipboard is empty"
+                        } else {
+                            typeIntoFocusedElement(clipText)
+                        }
+                    }
                     "POST /v1/browser/swipe" -> performTouchGesture(
                         payload.optInt("x1"), payload.optInt("y1"),
                         payload.optInt("x2"), payload.optInt("y2"),
@@ -607,6 +638,124 @@ class MainActivity : Activity() {
         }
         return JSONObject().put("ok", true).put("accepted", true)
             .put("queued", true).put("action", route)
+    }
+
+    /** Selects the word under a viewport-local point; never accepts page-supplied selectors or scripts. */
+    private fun selectWordAt(x: Int, y: Int) {
+        val script = """
+            (function() {
+              const x = $x, y = $y;
+              let range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) :
+                (document.caretPositionFromPoint ? (function(p) {
+                  if (!p) return null;
+                  const r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); return r;
+                })(document.caretPositionFromPoint(x, y)) : null);
+              if (!range || !range.startContainer) return JSON.stringify({ok:false,error:'no_text_at_point'});
+              const node = range.startContainer;
+              if (node.nodeType !== Node.TEXT_NODE || !node.textContent || !node.textContent.trim())
+                return JSON.stringify({ok:false,error:'point_is_not_text'});
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              if (typeof selection.modify === 'function') {
+                selection.modify('move', 'backward', 'word');
+                selection.modify('extend', 'forward', 'word');
+              } else {
+                const text = node.textContent, at = range.startOffset;
+                let start = at, end = at;
+                while (start > 0 && /[\w'-]/.test(text[start-1])) start--;
+                while (end < text.length && /[\w'-]/.test(text[end])) end++;
+                const wordRange = document.createRange(); wordRange.setStart(node,start); wordRange.setEnd(node,end);
+                selection.removeAllRanges(); selection.addRange(wordRange);
+              }
+              const selected = window.getSelection().toString();
+              return JSON.stringify({ok:selected.length>0,error:selected.length ? '' : 'nothing_selected',length:selected.length});
+            })()
+        """.trimIndent()
+        browser.evaluateJavascript(script) { raw -> handleSelectionResult("select", raw) }
+    }
+
+    /** Select all text only inside the currently focused editable control. */
+    private fun selectAllInFocusedElement() {
+        val script = """
+            (function() {
+              const el = document.activeElement;
+              if (!el) return JSON.stringify({ok:false,error:'no_focused_element'});
+              if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+                  typeof el.select === 'function' && !el.disabled && !el.readOnly) {
+                el.select();
+                return JSON.stringify({ok:true,length:(el.value || '').length});
+              }
+              if (el.isContentEditable) {
+                const range = document.createRange(); range.selectNodeContents(el);
+                const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+                return JSON.stringify({ok:true,length:selection.toString().length});
+              }
+              return JSON.stringify({ok:false,error:'focus_an_editable_field_first'});
+            })()
+        """.trimIndent()
+        browser.evaluateJavascript(script) { raw -> handleSelectionResult("select_all", raw) }
+    }
+
+    /** Copies only the current explicit selection; clipboard contents are never returned by the bridge. */
+    private fun copyCurrentSelection() {
+        val script = """
+            (function() {
+              const el = document.activeElement;
+              let text = '';
+              if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+                  typeof el.selectionStart === 'number' && typeof el.selectionEnd === 'number') {
+                text = (el.value || '').slice(el.selectionStart, el.selectionEnd);
+              } else {
+                text = window.getSelection ? window.getSelection().toString() : '';
+              }
+              return JSON.stringify({ok:text.length>0,length:text.length,text:text,error:text.length ? '' : 'no_selection'});
+            })()
+        """.trimIndent()
+        browser.evaluateJavascript(script) { raw ->
+            try {
+                val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+                val result = JSONObject(decoded ?: "{}")
+                if (result.optBoolean("ok")) {
+                    val clip = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clip.setPrimaryClip(android.content.ClipData.newPlainText("Loop Browser selection", result.optString("text", "")))
+                    lastAgentAction = "copy"
+                    lastAgentActionStatus = "completed"
+                    lastAgentActionAt = System.currentTimeMillis()
+                    status.text = "Copied selected text • " + result.optInt("length", 0) + " characters"
+                } else {
+                    lastAgentAction = "copy"
+                    lastAgentActionStatus = "rejected_no_selection"
+                    lastAgentActionAt = System.currentTimeMillis()
+                    status.text = "Copy failed • no text selected"
+                }
+            } catch (e: Exception) {
+                lastAgentAction = "copy"
+                lastAgentActionStatus = "failed"
+                lastAgentActionAt = System.currentTimeMillis()
+                status.text = "Copy failed • result unavailable"
+            }
+        }
+    }
+
+    private fun handleSelectionResult(action: String, raw: String?) {
+        try {
+            val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+            val result = JSONObject(decoded ?: "{}")
+            lastAgentAction = action
+            lastAgentActionStatus = if (result.optBoolean("ok")) "completed" else "rejected"
+            lastAgentActionAt = System.currentTimeMillis()
+            status.text = if (result.optBoolean("ok")) {
+                "Selection ready • " + result.optInt("length", 0) + " characters"
+            } else {
+                "Selection failed • " + result.optString("error", "not selectable")
+            }
+        } catch (e: Exception) {
+            lastAgentAction = action
+            lastAgentActionStatus = "failed"
+            lastAgentActionAt = System.currentTimeMillis()
+            status.text = "Selection failed • result unavailable"
+        }
     }
 
     /**

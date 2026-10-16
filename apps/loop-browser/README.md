@@ -40,6 +40,27 @@ curl -sS -X POST http://127.0.0.1:8789/v1/browser/swipe -H 'Content-Type: applic
 curl -sS -X POST http://127.0.0.1:8789/v1/browser/scroll -H 'Content-Type: application/json' -d '{"direction":"down","amount":500}'
 ```
 
+## Text and clipboard controls
+
+The local Loop Browser bridge supports bounded actions on the currently focused or explicitly selected page text; it does not accept caller-supplied JavaScript or CSS selectors.
+
+- `POST /v1/browser/type` JSON `{"text":"plain text"}` inserts up to 4,000 characters into the focused input, textarea, or contenteditable.
+- `POST /v1/browser/select` JSON `{"x":300,"y":250}` selects the word at WebView viewport-local coordinates.
+- `POST /v1/browser/select_all` selects all text in the currently focused editable element.
+- `POST /v1/browser/copy` copies the currently selected page/input text to Android's clipboard. The bridge returns no copied text.
+- `POST /v1/browser/paste` inserts Android clipboard plain text into the focused editable element. It rejects an empty clipboard.
+
+Tap/focus the intended field first. These actions do not submit forms, solve CAPTCHAs, or bypass authentication. Selection/type/copy/paste callbacks update browser action status asynchronously; poll `GET /v1/browser/state` and capture a fresh screenshot to verify the result. Clipboard access is limited to these explicit copy/paste actions.
+
+Example:
+```sh
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/type -H 'Content-Type: application/json' -d '{"text":"sample text"}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/select -H 'Content-Type: application/json' -d '{"x":300,"y":250}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/select_all -H 'Content-Type: application/json' -d '{}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/copy -H 'Content-Type: application/json' -d '{}'
+curl -sS -X POST http://127.0.0.1:8789/v1/browser/paste -H 'Content-Type: application/json' -d '{}'
+```
+
 ## AI Action Loop prototype (Stage 2)
 
 The app exposes `POST /v1/browser/agent/step` on the loopback bridge. It accepts exactly one allowlisted action per request; it does not accept arbitrary JavaScript, CSS selectors, shell commands, or batches.
