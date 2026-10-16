@@ -335,6 +335,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleBrowserBridgeAction(route: String, payload: JSONObject): JSONObject {
+        android.util.Log.i("LoopBrowserBridge", "Dispatching UI action: $route")
         val answer = arrayOf(JSONObject().put("ok", false).put("error", "action timeout"))
         val latch = CountDownLatch(1)
         runOnUiThread {
@@ -396,7 +397,11 @@ class MainActivity : Activity() {
                 latch.countDown()
             }
         }
-        if (!latch.await(5, TimeUnit.SECONDS)) return JSONObject().put("ok", false).put("error", "UI action timed out")
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+            android.util.Log.e("LoopBrowserBridge", "UI action timed out: $route; Activity main thread did not complete it")
+            return JSONObject().put("ok", false).put("error", "UI action timed out")
+        }
+        android.util.Log.i("LoopBrowserBridge", "Completed UI action: $route")
         return answer[0]
     }
 
