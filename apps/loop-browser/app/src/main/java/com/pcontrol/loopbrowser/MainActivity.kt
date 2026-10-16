@@ -390,6 +390,9 @@ class MainActivity : Activity() {
                 cachedCanGoBack = view?.canGoBack() ?: false
                 cachedCanGoForward = view?.canGoForward() ?: false
                 address.setText(url.orEmpty())
+                if (desktopMode && view != null) {
+                    applyDesktopViewport(view)
+                }
                 status.text = "Ready • " + url.orEmpty()
                 // Start observing automatically on the first completed page; no manual tap needed.
                 if (!observeAutoStarted) {
@@ -992,6 +995,12 @@ class MainActivity : Activity() {
         lastAgentActionStatus = "dispatched"
         lastAgentActionAt = System.currentTimeMillis()
         status.text = "Browser zoom: " + (browserZoomFactor * 100).toInt() + "%"
+    }
+
+    private fun applyDesktopViewport(view: WebView) {
+        // Force responsive pages to recalculate at a desktop CSS width, not the phone width.
+        val script = "(function(){var d=document;var m=d.querySelector('meta[name=\"viewport\"]');if(!m){m=d.createElement('meta');m.name='viewport';d.head.appendChild(m);}m.setAttribute('content','width=1280, initial-scale=1.0');d.documentElement.style.minWidth='1280px';if(d.body)d.body.style.minWidth='1280px';window.dispatchEvent(new Event('resize'));return {viewport:m.content,width:document.documentElement.clientWidth};})()"
+        view.evaluateJavascript(script, null)
     }
 
     private fun toggleDesktopMode() {
