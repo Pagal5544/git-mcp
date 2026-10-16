@@ -58,6 +58,9 @@ class MainActivity : Activity() {
     @Volatile private var cachedBrowserWidth: Int = 0
     @Volatile private var cachedBrowserHeight: Int = 0
     @Volatile private var cachedCanGoBack: Boolean = false
+    @Volatile private var latestCaptureFileName: String = ""
+    @Volatile private var latestCaptureOk: Boolean = false
+    @Volatile private var latestCaptureTimestamp: Long = 0L
     private var bridgeStatus: TextView? = null
     private var browserBridge: BrowserBridge? = null
     private var loopStep = 0
@@ -362,6 +365,9 @@ class MainActivity : Activity() {
                 .put("canGoBack", cachedCanGoBack)
                 .put("viewportWidth", cachedBrowserWidth)
                 .put("viewportHeight", cachedBrowserHeight)
+                .put("lastCaptureOk", latestCaptureOk)
+                .put("lastCaptureFile", latestCaptureFileName)
+                .put("lastCaptureTimestamp", latestCaptureTimestamp)
                 .put("timestamp", System.currentTimeMillis())
         }
 
@@ -386,7 +392,16 @@ class MainActivity : Activity() {
                     }
                     "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
                     "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
-                    "POST /v1/browser/capture" -> captureViewportForBridge()
+                    "POST /v1/browser/capture" -> {
+                        val capture = captureViewportForBridge()
+                        latestCaptureFileName = capture?.name.orEmpty()
+                        latestCaptureOk = capture != null
+                        latestCaptureTimestamp = System.currentTimeMillis()
+                        android.util.Log.i(
+                            "LoopBrowserBridge",
+                            "MCP capture completed: ok=$latestCaptureOk file=$latestCaptureFileName"
+                        )
+                    }
                     "POST /v1/browser/start" -> startObserveLoop("mcp")
                     "POST /v1/browser/stop" -> stopObserveLoop("MCP")
                 }
