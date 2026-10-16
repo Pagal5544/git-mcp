@@ -845,9 +845,20 @@ class MainActivity : Activity() {
               el.focus();
               const text = $safeText;
               if (isEditable) {
-                // Insert at the editor's real selection; never append as a fallback.
+                // Ensure the browser selection/caret belongs to this editor before inserting.
+                // GitHub can focus the editor root without creating a caret, making execCommand return false.
+                const selection = window.getSelection();
+                const containsSelection = selection && selection.rangeCount > 0 && el.contains(selection.anchorNode);
+                if (!containsSelection && el.isContentEditable) {
+                  const range = document.createRange();
+                  range.selectNodeContents(el);
+                  range.collapse(false);
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+                }
+                el.focus();
                 const inserted = document.execCommand('insertText', false, text);
-                if (!inserted) return JSON.stringify({ok:false,error:'editor_insertText_failed_selection_preserved'});
+                if (!inserted) return JSON.stringify({ok:false,error:'editor_insertText_failed',hasSelection:!!(selection && selection.rangeCount),selectionInside:!!(selection && selection.anchorNode && el.contains(selection.anchorNode)),editorTag:el.tagName || '',editorClass:typeof el.className === 'string' ? el.className.toString().slice(0,120) : ''});
               } else {
                 const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
                 const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
