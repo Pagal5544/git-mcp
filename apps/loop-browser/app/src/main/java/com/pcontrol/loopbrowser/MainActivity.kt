@@ -335,6 +335,19 @@ class MainActivity : Activity() {
     }
 
     private fun handleBrowserBridgeAction(route: String, payload: JSONObject): JSONObject {
+        // Read-only state polling uses a thread-safe snapshot and never blocks on WebView/UI.
+        if (route == "GET /v1/browser/state") {
+            return JSONObject().put("ok", true)
+                .put("url", cachedBrowserUrl)
+                .put("title", cachedBrowserTitle)
+                .put("loading", pageLoading)
+                .put("desktopMode", desktopMode)
+                .put("observeLoopRunning", loopRunning)
+                .put("canGoBack", cachedCanGoBack)
+                .put("viewportWidth", cachedBrowserWidth)
+                .put("viewportHeight", cachedBrowserHeight)
+                .put("timestamp", System.currentTimeMillis())
+        }
         android.util.Log.i("LoopBrowserBridge", "Dispatching UI action: $route")
         val answer = arrayOf(JSONObject().put("ok", false).put("error", "action timeout"))
         val latch = CountDownLatch(1)
