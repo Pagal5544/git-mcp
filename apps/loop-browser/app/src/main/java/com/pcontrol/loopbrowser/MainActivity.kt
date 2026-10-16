@@ -407,7 +407,8 @@ class MainActivity : Activity() {
                 .put("url", cachedBrowserUrl)
                 .put("title", cachedBrowserTitle)
                 .put("loading", pageLoading)
-                .put("navigationStatus", if (pageLoading && cachedNavigationStartedAt > 0L &&
+                .put("navigationStatus", if (cachedNavigationStatus == "started" && pageLoading &&
+                    cachedNavigationStartedAt > 0L &&
                     System.currentTimeMillis() - cachedNavigationStartedAt >= navigationTimeoutMs) "timed_out" else cachedNavigationStatus)
                 .put("navigationError", cachedNavigationError)
                 .put("navigationStartedAt", cachedNavigationStartedAt)
@@ -427,6 +428,18 @@ class MainActivity : Activity() {
         if (route == "GET /health") {
             return JSONObject().put("ok", true).put("bridge", "loop-browser")
                 .put("version", 1).put("ready", !isFinishing)
+        }
+
+        // Reset navigation telemetry when a navigation-like action is accepted, before
+        // it is queued on the UI thread. This prevents an old loading timestamp from
+        // making the new request appear timed out while it is still waiting in the queue.
+        if (route == "POST /v1/browser/navigate" || route == "POST /v1/browser/reload" ||
+            route == "POST /v1/browser/back") {
+            cachedNavigationStatus = "queued"
+            cachedNavigationError = ""
+            cachedNavigationStartedAt = 0L
+            cachedNavigationFinishedAt = 0L
+            pageLoading = false
         }
 
         // Do not block the socket worker waiting on Android's main thread. WebView can
