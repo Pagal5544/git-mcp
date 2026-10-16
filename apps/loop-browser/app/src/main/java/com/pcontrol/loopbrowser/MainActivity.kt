@@ -401,6 +401,19 @@ class MainActivity : Activity() {
     }
 
     private fun handleBrowserBridgeAction(route: String, payload: JSONObject): JSONObject {
+        // Validate navigation synchronously so invalid requests are rejected to the caller
+        // instead of being acknowledged and leaving navigation telemetry stuck at queued.
+        if (route == "POST /v1/browser/navigate") {
+            val raw = payload.optString("url", "").trim()
+            val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
+            val scheme = uri?.scheme?.lowercase()
+            if (raw.isBlank() || raw.any { it.isWhitespace() } ||
+                (scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
+                return JSONObject().put("ok", false)
+                    .put("error", "Invalid URL: only absolute HTTP/HTTPS URLs with a host are supported")
+            }
+        }
+
         // State polling is served from a volatile snapshot and never waits for the UI thread.
         if (route == "GET /v1/browser/state") {
             return JSONObject().put("ok", true)
@@ -447,15 +460,7 @@ class MainActivity : Activity() {
         runOnUiThread {
             try {
                 when (route) {
-                    "POST /v1/browser/navigate" -> {
-                        val raw = payload.optString("url", "").trim()
-                        val uri = android.net.Uri.parse(raw)
-                        if (raw.isNotBlank() && (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()) {
-                            navigate(raw)
-                        } else {
-                            status.text = "MCP rejected invalid URL"
-                        }
-                    }
+                    "POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
                     "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
                     "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
                     "POST /v1/browser/capture" -> {
