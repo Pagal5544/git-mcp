@@ -6,7 +6,6 @@ import java.io.BufferedOutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
-import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /**
@@ -14,7 +13,6 @@ import java.util.concurrent.Executors
  * The Activity supplies an action handler; this class never exposes shell execution.
  */
 class BrowserBridge(
-    private val tokenProvider: () -> String,
     private val actionHandler: (String, JSONObject) -> JSONObject,
     private val statusHandler: (String) -> Unit = {}
 ) {
@@ -85,10 +83,7 @@ class BrowserBridge(
                     if (count < 0) break
                     offset += count
                 }
-                val expected = tokenProvider()
-                val supplied = headers["x-loop-browser-token"].orEmpty()
-                if (expected.length < 32 || !MessageDigest.isEqual(supplied.toByteArray(), expected.toByteArray()))
-                    return respond(client, 401, JSONObject().put("error", "unauthorized"))
+                // No pairing token: this listener is bound strictly to 127.0.0.1.
                 val payload = try { if (body.isNotEmpty()) JSONObject(String(body, Charsets.UTF_8)) else JSONObject() }
                     catch (_: Exception) { return respond(client, 400, JSONObject().put("error", "invalid JSON")) }
                 val route = first[1].substringBefore("?")
