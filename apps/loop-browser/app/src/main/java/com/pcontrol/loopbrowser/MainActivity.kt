@@ -824,21 +824,19 @@ class MainActivity : Activity() {
             (function() {
               const active = document.activeElement;
               if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
-              const editorSelector = '.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]';
-              const editableSelector = '[contenteditable="true"],[role="textbox"],.cm-content,textarea.js-code-editor-input';
-              let root = active.closest ? active.closest('[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]') : null;
-              // GitHub's editor may leave document.activeElement on BODY even after a viewport tap.
-              // Only use a recognized code-editor surface as a fallback; never type into arbitrary page text.
-              if (!root && /github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname)) {
-                root = document.querySelector(editorSelector);
-              }
+              const editorSelector = '.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea';
+              const editableSelector = '[contenteditable="true"],[role="textbox"],.cm-content,textarea.js-code-editor-input,textarea#textarea';
+              let root = active.closest ? active.closest('[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea') : null;
+              const isGithubEdit = /(^|\.)github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname);
+              // GitHub can keep focus on BODY while its CodeMirror surface is visible.
+              if (!root && isGithubEdit) root = document.querySelector(editorSelector);
               let el = active;
               if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && root) {
-                const content = root.matches && root.matches(editableSelector) ? root : root.querySelector(editableSelector);
-                const hiddenInput = root.querySelector('textarea,input');
-                el = content || (active.isContentEditable ? active : hiddenInput) || root;
+                const content = (root.matches && root.matches(editableSelector)) ? root : root.querySelector(editableSelector);
+                const hiddenInput = root.matches && root.matches('textarea,input') ? root : root.querySelector('textarea,input');
+                el = content || hiddenInput || (active.isContentEditable ? active : null);
               }
-              if (!el || el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'no_editable_focused_element',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : ''});
+              if (!el || el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'no_editable_focused_element',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length,editableCount:document.querySelectorAll(editableSelector).length});
               const isInput = el instanceof HTMLInputElement &&
                 !['button','submit','reset','checkbox','radio','file','hidden','image'].includes(el.type);
               const isTextArea = el instanceof HTMLTextAreaElement;
@@ -884,7 +882,9 @@ class MainActivity : Activity() {
                     lastAgentActionStatus = "completed"
                 } else {
                     status.text = "Text entry failed • " + result.optString("error", "field not editable")
-                    lastAgentActionStatus = "rejected_no_editable_field"
+                    lastAgentAction = "type"
+                    lastAgentActionStatus = "rejected_" + result.optString("error", "unknown").replace(Regex("[^A-Za-z0-9_]+"), "_").take(80)
+                    android.util.Log.w("LoopBrowserBridge", "Typing rejected: " + result.toString())
                 }
                 lastAgentActionAt = System.currentTimeMillis()
             } catch (e: Exception) {
