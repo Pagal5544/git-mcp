@@ -410,17 +410,91 @@ class MainActivity : Activity() {
     }
 
     private fun handleBrowserBridgeAction(route: String, payload: JSONObject): JSONObject {
+        // Validate navigation synchronously so invalid requests are rejected to the caller
+        // instead of being acknowledged and leaving navigation telemetry stuck at queued.
+        if (route == "POST /v1/browser/navigate") {
+            val raw = payload.optString("url", "").trim()
+            val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
+            val scheme = uri?.scheme?.lowercase()
+            if (raw.isBlank() || raw.any { it.isWhitespace() } ||
+                (scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
+                return JSONObject().put("ok", false)
+                    .put("error", "Invalid URL: only absolute HTTP/HTTPS URLs with a host are supported")
+            }
+        }
+
+        // The agent endpoint accepts exactly one allowlisted action per request.
+        // It deliberately has no arbitrary JavaScript, CSS-click, shell, or batch-action mode.
+        if (route == "POST /v1/browser/agent/step") {
+            val action = payload.optString("action", "").trim().lowercase()
+            if (action !in allowedAgentActions) {
+                return JSONObject().put("ok", false)
+                    .put("error", "Unsupported agent action; allowed: " + allowedAgentActions.sorted().joinToString(","))
+            }
+            if (action == "navigate") {
+                val raw = payload.optString("url", "").trim()
+                val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
+                val scheme = uri?.scheme?.lowercase()
+                if (raw.isBlank() || raw.any { it.isWhitespace() } ||
+                    (scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
+                    return JSONObject().put("ok", false)
+                        .put("error", "navigate requires an absolute HTTP/HTTPS URL with a host")
+                }
+            }
+            lastAgentAction = action
+            lastAgentActionStatus = "queued"
+            lastAgentActionAt = System.currentTimeMillis()
+        }
+
+        // Validate touch actions against the WebView viewport before queuing them.
+        if (route == "POST /v1/browser/tap") {
+            if (!payload.has("x") || !payload.has("y") ||
+                !validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
+                return JSONObject().put("ok", false).put("error", "tap requires x,y inside the WebView viewport")
+            }
+        }
+        if (route == "POST /v1/browser/swipe") {
+            val duration = payload.optLong("durationMs", 350L)
+            if (!payload.has("x1") || !payload.has("y1") || !payload.has("x2") || !payload.has("y2") ||
+                !validTouchPoint(payload.optInt("x1", -1), payload.optInt("y1", -1)) ||
+                !validTouchPoint(payload.optInt("x2", -1), payload.optInt("y2", -1)) ||
+                duration !in 80L..2000L) {
+                return JSONObject().put("ok", false).put("error", "swipe requires valid viewport coordinates and durationMs 80..2000")
+            }
+        }
+        if (route == "POST /v1/browser/scroll") {
+            val direction = payload.optString("direction", "").lowercase()
+            val amount = payload.optInt("amount", 500)
+            if (direction !in setOf("up", "down") || amount !in 80..1200) {
+                return JSONObject().put("ok", false).put("error", "scroll requires direction up/down and amount 80..1200")
+            }
+        }
+
         // State polling is served from a volatile snapshot and never waits for the UI thread.
         if (route == "GET /v1/browser/state") {
             return JSONObject().put("ok", true)
                 .put("url", cachedBrowserUrl)
                 .put("title", cachedBrowserTitle)
                 .put("loading", pageLoading)
+                .put("navigationStatus", if (cachedNavigationStatus == "started" && pageLoading &&
+                    cachedNavigationStartedAt > 0L &&
+                    System.currentTimeMillis() - cachedNavigationStartedAt >= navigationTimeoutMs) "timed_out" else cachedNavigationStatus)
+                .put("navigationError", cachedNavigationError)
+                .put("navigationStartedAt", cachedNavigationStartedAt)
+                .put("navigationFinishedAt", cachedNavigationFinishedAt)
+                .put("navigationTimeoutMs", navigationTimeoutMs)
                 .put("desktopMode", desktopMode)
                 .put("observeLoopRunning", loopRunning)
                 .put("canGoBack", cachedCanGoBack)
+                .put("canGoForward", cachedCanGoForward)
                 .put("viewportWidth", cachedBrowserWidth)
                 .put("viewportHeight", cachedBrowserHeight)
+                .put("lastCaptureOk", latestCaptureOk)
+                .put("lastCaptureFile", latestCaptureFileName)
+                .put("lastCaptureTimestamp", latestCaptureTimestamp)
+                .put("agentLastAction", lastAgentAction)
+                .put("agentLastActionStatus", lastAgentActionStatus)
+                .put("agentLastActionAt", lastAgentActionAt)
                 .put("timestamp", System.currentTimeMillis())
         }
 
@@ -429,28 +503,102 @@ class MainActivity : Activity() {
                 .put("version", 1).put("ready", !isFinishing)
         }
 
+        // Reset navigation telemetry when a navigation-like action is accepted, before
+        // it is queued on the UI thread. This prevents an old loading timestamp from
+        // making the new request appear timed out while it is still waiting in the queue.
+        if (route == "POST /v1/browser/navigate" || route == "POST /v1/browser/reload" ||
+            route == "POST /v1/browser/back" || route == "POST /v1/browser/forward" ||
+            route == "POST /v1/browser/desktop") {
+            cachedNavigationStatus = "queued"
+            cachedNavigationError = ""
+            cachedNavigationStartedAt = 0L
+            cachedNavigationFinishedAt = 0L
+            pageLoading = false
+        }
+
         // Do not block the socket worker waiting on Android's main thread. WebView can
         // be busy loading/rendering; queue the operation and acknowledge the request.
         runOnUiThread {
             try {
                 when (route) {
-                    "POST /v1/browser/navigate" -> {
-                        val raw = payload.optString("url", "").trim()
-                        val uri = android.net.Uri.parse(raw)
-                        if (raw.isNotBlank() && (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()) {
-                            navigate(raw)
-                        } else {
-                            status.text = "MCP rejected invalid URL"
-                        }
+                    "POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
+                    "POST /v1/browser/tap" -> {
+                        val x = payload.optInt("x")
+                        val y = payload.optInt("y")
+                        performTouchGesture(x, y, x, y, 80L)
+                    }
+                    "POST /v1/browser/swipe" -> performTouchGesture(
+                        payload.optInt("x1"), payload.optInt("y1"),
+                        payload.optInt("x2"), payload.optInt("y2"),
+                        payload.optLong("durationMs", 350L)
+                    )
+                    "POST /v1/browser/scroll" -> {
+                        val amount = payload.optInt("amount", 500)
+                        val centerX = (browser.width / 2).coerceAtLeast(1)
+                        val startY = if (payload.optString("direction").lowercase() == "down")
+                            (browser.height * 3 / 4).coerceAtLeast(1) else (browser.height / 4).coerceAtLeast(1)
+                        val endY = if (payload.optString("direction").lowercase() == "down")
+                            (startY - amount).coerceAtLeast(1) else (startY + amount).coerceAtMost(browser.height - 1)
+                        performTouchGesture(centerX, startY, centerX, endY, 350L)
                     }
                     "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
+                    "POST /v1/browser/forward" -> if (::browser.isInitialized && browser.canGoForward()) browser.goForward()
+                    "POST /v1/browser/desktop" -> {
+                        val requested = payload.opt("enabled")
+                        if (requested !is Boolean) {
+                            android.util.Log.w("LoopBrowserBridge", "Desktop toggle requires boolean enabled")
+                        } else if (desktopMode != requested) {
+                            toggleDesktopMode()
+                        }
+                    }
                     "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
-                    "POST /v1/browser/capture" -> captureViewportForBridge()
-                    "POST /v1/browser/stop" -> {
-                        loopRunning = false
-                        loopHandler.removeCallbacksAndMessages(null)
-                        if (::loopButton.isInitialized) loopButton.text = "Start Observe Loop"
-                        if (::status.isInitialized) status.text = "Observe loop stopped by MCP"
+                    "POST /v1/browser/capture" -> {
+                        val capture = captureViewportForBridge()
+                        latestCaptureFileName = capture?.name.orEmpty()
+                        latestCaptureOk = capture != null
+                        latestCaptureTimestamp = System.currentTimeMillis()
+                        android.util.Log.i(
+                            "LoopBrowserBridge",
+                            "MCP capture completed: ok=$latestCaptureOk file=$latestCaptureFileName"
+                        )
+                    }
+                    "POST /v1/browser/start" -> startObserveLoop("mcp")
+                    "POST /v1/browser/stop" -> stopObserveLoop("MCP")
+                    "POST /v1/browser/agent/step" -> {
+                        val action = payload.optString("action", "").trim().lowercase()
+                        when (action) {
+                            "observe" -> {
+                                lastAgentActionStatus = "completed"
+                                status.text = "Agent observed current page • " + browser.title.orEmpty()
+                            }
+                            "navigate" -> navigate(payload.optString("url", "").trim()).also {
+                                lastAgentActionStatus = "executed"
+                            }
+                            "back" -> {
+                                if (browser.canGoBack()) { browser.goBack(); lastAgentActionStatus = "executed" }
+                                else lastAgentActionStatus = "rejected_no_history"
+                            }
+                            "forward" -> {
+                                if (browser.canGoForward()) { browser.goForward(); lastAgentActionStatus = "executed" }
+                                else lastAgentActionStatus = "rejected_no_forward_history"
+                            }
+                            "reload" -> { browser.reload(); lastAgentActionStatus = "executed" }
+                            "capture" -> {
+                                val capture = captureViewportForBridge()
+                                latestCaptureFileName = capture?.name.orEmpty()
+                                latestCaptureOk = capture != null
+                                latestCaptureTimestamp = System.currentTimeMillis()
+                                lastAgentActionStatus = if (capture != null) "completed" else "failed_capture"
+                            }
+                            "desktop_on", "desktop_off" -> {
+                                val requested = action == "desktop_on"
+                                if (desktopMode != requested) toggleDesktopMode()
+                                lastAgentActionStatus = "executed"
+                            }
+                            "stop" -> { stopObserveLoop("agent"); lastAgentActionStatus = "completed" }
+                        }
+                        lastAgentActionAt = System.currentTimeMillis()
+                        android.util.Log.i("LoopBrowserBridge", "Agent step: action=$action status=$lastAgentActionStatus")
                     }
                 }
             } catch (e: Exception) {
@@ -459,6 +607,117 @@ class MainActivity : Activity() {
         }
         return JSONObject().put("ok", true).put("accepted", true)
             .put("queued", true).put("action", route)
+    }
+
+    /**
+     * Inserts plain text into the page's currently focused editable element.
+     * The caller cannot provide JavaScript or a selector; text is JSON-escaped and
+     * inserted only into an input, textarea, or contenteditable element.
+     */
+    private fun typeIntoFocusedElement(text: String) {
+        val safeText = JSONObject.quote(text)
+        val script = """
+            (function() {
+              const el = document.activeElement;
+              if (!el || el.disabled || el.readOnly) {
+                return JSON.stringify({ok:false,error:'no_editable_focused_element'});
+              }
+              const isInput = el instanceof HTMLInputElement &&
+                !['button','submit','reset','checkbox','radio','file','hidden','image'].includes(el.type);
+              const isTextArea = el instanceof HTMLTextAreaElement;
+              const isEditable = el.isContentEditable;
+              if (!(isInput || isTextArea || isEditable)) {
+                return JSON.stringify({ok:false,error:'focus_an_editable_field_first'});
+              }
+              const text = $safeText;
+              if (isEditable) {
+                const inserted = document.execCommand('insertText', false, text);
+                if (!inserted) el.textContent = (el.textContent || '') + text;
+              } else {
+                const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+                const setter = descriptor && descriptor.set;
+                if (!setter) return JSON.stringify({ok:false,error:'field_setter_unavailable'});
+                const value = el.value || '';
+                const start = typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
+                const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : value.length;
+                setter.call(el, value.slice(0, start) + text + value.slice(end));
+                if (typeof el.setSelectionRange === 'function') {
+                  el.setSelectionRange(start + text.length, start + text.length);
+                }
+              }
+              el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
+              el.dispatchEvent(new Event('change', {bubbles:true}));
+              return JSON.stringify({
+                ok:true,
+                fieldType:isInput ? el.type : (isTextArea ? 'textarea' : 'contenteditable'),
+                insertedLength:text.length
+              });
+            })()
+        """.trimIndent()
+        browser.evaluateJavascript(script) { raw ->
+            try {
+                val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+                val result = JSONObject(decoded ?: "{}")
+                if (result.optBoolean("ok")) {
+                    val kind = result.optString("fieldType", "field")
+                    val length = result.optInt("insertedLength", 0)
+                    status.text = "Text entered • $kind • $length characters"
+                    lastAgentAction = "type"
+                    lastAgentActionStatus = "completed"
+                } else {
+                    status.text = "Text entry failed • " + result.optString("error", "field not editable")
+                    lastAgentActionStatus = "rejected_no_editable_field"
+                }
+                lastAgentActionAt = System.currentTimeMillis()
+            } catch (e: Exception) {
+                status.text = "Text entry failed • result unavailable"
+                lastAgentActionStatus = "failed"
+                android.util.Log.w("LoopBrowserBridge", "Unable to parse text-entry result", e)
+            }
+        }
+    }
+
+    private fun validTouchPoint(x: Int, y: Int): Boolean =
+        ::browser.isInitialized && browser.width > 0 && browser.height > 0 &&
+            x >= 0 && y >= 0 && x < browser.width && y < browser.height
+
+    /** Dispatches a WebView touch sequence in viewport-local pixel coordinates. */
+    private fun performTouchGesture(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long) {
+        if (!validTouchPoint(x1, y1) || !validTouchPoint(x2, y2)) {
+            lastAgentActionStatus = "rejected_invalid_coordinates"
+            return
+        }
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x1.toFloat(), y1.toFloat(), 0)
+        browser.dispatchTouchEvent(down)
+        down.recycle()
+        val steps = if (x1 == x2 && y1 == y2) 1 else 8
+        for (step in 1 until steps) {
+            val delay = durationMs * step / steps
+            loopHandler.postDelayed({
+                if (!::browser.isInitialized || isFinishing) return@postDelayed
+                val fraction = step.toFloat() / steps.toFloat()
+                val x = x1 + ((x2 - x1) * fraction).toInt()
+                val y = y1 + ((y2 - y1) * fraction).toInt()
+                val now = SystemClock.uptimeMillis()
+                val move = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_MOVE, x.toFloat(), y.toFloat(), 0)
+                browser.dispatchTouchEvent(move)
+                move.recycle()
+            }, delay)
+        }
+        loopHandler.postDelayed({
+            if (!::browser.isInitialized || isFinishing) return@postDelayed
+            val now = SystemClock.uptimeMillis()
+            val up = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_UP, x2.toFloat(), y2.toFloat(), 0)
+            browser.dispatchTouchEvent(up)
+            up.recycle()
+            lastAgentAction = if (x1 == x2 && y1 == y2) "tap" else "swipe"
+            lastAgentActionStatus = "dispatched"
+            lastAgentActionAt = System.currentTimeMillis()
+            status.text = "Touch " + lastAgentAction + " dispatched • (" + x2 + "," + y2 + ")"
+            android.util.Log.i("LoopBrowserBridge", "Touch gesture dispatched: action=" + lastAgentAction + " from=(" + x1 + "," + y1 + ") to=(" + x2 + "," + y2 + ")")
+        }, durationMs)
     }
 
     private fun captureViewportForBridge(): File? {
