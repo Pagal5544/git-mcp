@@ -17,6 +17,8 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.content.Intent
+import androidx.browser.customtabs.CustomTabsIntent
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -355,7 +357,14 @@ class MainActivity : Activity() {
         browser.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView?, request: WebResourceRequest?
-            ): Boolean = false
+            ): Boolean {
+                val uri = request?.url ?: return false
+                if (isGoogleAccountSignInUrl(uri)) {
+                    openGoogleSignInInSecureBrowser(uri)
+                    return true
+                }
+                return false
+            }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 cachedBrowserUrl = url.orEmpty()
@@ -1126,7 +1135,39 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Only HTTP/HTTPS pages are supported", Toast.LENGTH_SHORT).show()
             return
         }
-        browser.loadUrl(candidate)
+        if (isGoogleAccountSignInUrl(uri)) {
+            openGoogleSignInInSecureBrowser(uri)
+        } else {
+            browser.loadUrl(candidate)
+        }
+    }
+
+    private fun isGoogleAccountSignInUrl(uri: android.net.Uri): Boolean {
+        return uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals("accounts.google.com", ignoreCase = true)
+    }
+
+    private fun openGoogleSignInInSecureBrowser(uri: android.net.Uri) {
+        try {
+            CustomTabsIntent.Builder().build().launchUrl(this, uri)
+            status.text = "Google sign-in opened in secure browser"
+        } catch (e: Exception) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, uri))
+                status.text = "Google sign-in opened in external browser"
+            } catch (fallbackError: Exception) {
+                Toast.makeText(
+                    this,
+                    "No supported browser is available for Google sign-in",
+                    Toast.LENGTH_LONG
+                ).show()
+                android.util.Log.e(
+                    "LoopBrowser",
+                    "Unable to launch secure Google sign-in browser",
+                    fallbackError
+                )
+            }
+        }
     }
 
     private fun captureViewport() {
