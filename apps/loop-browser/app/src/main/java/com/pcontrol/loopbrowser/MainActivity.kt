@@ -141,6 +141,7 @@ class MainActivity : Activity() {
             })
         }
         addAction("Back") { if (browser.canGoBack()) browser.goBack() }
+        addAction("Forward") { if (browser.canGoForward()) browser.goForward() }
         addAction("Reload") { browser.reload() }
         addAction("Capture") { captureViewport() }
         actionsRow = actions
