@@ -17,8 +17,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.content.Intent
-import androidx.browser.customtabs.CustomTabsIntent
+import android.webkit.WebSettings
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -357,14 +356,7 @@ class MainActivity : Activity() {
         browser.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView?, request: WebResourceRequest?
-            ): Boolean {
-                val uri = request?.url ?: return false
-                if (isGoogleAccountSignInUrl(uri)) {
-                    openGoogleSignInInSecureBrowser(uri, handoffCurrentSite = true)
-                    return true
-                }
-                return false
-            }
+            ): Boolean = false
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 cachedBrowserUrl = url.orEmpty()
@@ -1007,16 +999,22 @@ class MainActivity : Activity() {
         browser.settings.apply {
             useWideViewPort = desktopMode
             loadWithOverviewMode = desktopMode
+            layoutAlgorithm = WebSettings.LayoutAlgorithm.NORMAL
             userAgentString = if (desktopMode) {
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             } else {
                 mobileUserAgent
             }
         }
         desktopButton.text = if (desktopMode) "Desktop: On" else "Desktop: Off"
         val currentUrl = browser.url ?: address.text.toString()
-        if (currentUrl.isNotBlank()) browser.loadUrl(currentUrl)
-        status.text = if (desktopMode) "Desktop mode enabled • reloading page" else "Mobile mode enabled • reloading page"
+        if (currentUrl.isNotBlank()) {
+            // Force a fresh navigation after switching UA/viewport so sites such as GitHub
+            // do not keep the previously rendered mobile layout.
+            browser.stopLoading()
+            browser.loadUrl(currentUrl)
+        }
+        status.text = if (desktopMode) "Desktop mode enabled • desktop layout requested • reloading page" else "Mobile mode enabled • reloading page"
     }
 
     private fun toggleObserveLoop() {
@@ -1139,57 +1137,6 @@ class MainActivity : Activity() {
             openGoogleSignInInSecureBrowser(uri)
         } else {
             browser.loadUrl(candidate)
-        }
-    }
-
-    private fun isGoogleAccountSignInUrl(uri: android.net.Uri): Boolean {
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            uri.host.equals("accounts.google.com", ignoreCase = true)
-    }
-
-    private fun openGoogleSignInInSecureBrowser(
-        uri: android.net.Uri, handoffCurrentSite: Boolean = false
-    ) {
-        // Google blocks OAuth inside embedded WebViews. Move the entire relying-party
-        // page to a real browser so its Google OAuth redirect and resulting site session
-        // remain together in that browser. Do not attempt to copy cookies into WebView.
-        val currentPage = browser.url?.let { android.net.Uri.parse(it) }
-        val handoffUri = if (
-            handoffCurrentSite &&
-            currentPage != null &&
-            (currentPage.scheme.equals("https", true) || currentPage.scheme.equals("http", true)) &&
-            !isGoogleAccountSignInUrl(currentPage)
-        ) currentPage else uri
-
-        try {
-            CustomTabsIntent.Builder().build().launchUrl(this, handoffUri)
-            Toast.makeText(
-                this,
-                "Google sign-in needs a supported browser. In the opened tab, tap Sign in with Google again.",
-                Toast.LENGTH_LONG
-            ).show()
-            status.text = "Google sign-in handed off to secure browser"
-        } catch (e: Exception) {
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, handoffUri))
-                Toast.makeText(
-                    this,
-                    "Continue Google sign-in in the external browser.",
-                    Toast.LENGTH_LONG
-                ).show()
-                status.text = "Google sign-in handed off to external browser"
-            } catch (fallbackError: Exception) {
-                Toast.makeText(
-                    this,
-                    "No supported browser is available for Google sign-in",
-                    Toast.LENGTH_LONG
-                ).show()
-                android.util.Log.e(
-                    "LoopBrowser",
-                    "Unable to launch secure Google sign-in browser",
-                    fallbackError
-                )
-            }
         }
     }
 
