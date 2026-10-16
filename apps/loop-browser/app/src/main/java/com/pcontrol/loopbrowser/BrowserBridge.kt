@@ -15,7 +15,8 @@ import java.util.concurrent.Executors
  */
 class BrowserBridge(
     private val tokenProvider: () -> String,
-    private val actionHandler: (String, JSONObject) -> JSONObject
+    private val actionHandler: (String, JSONObject) -> JSONObject,
+    private val statusHandler: (String) -> Unit = {}
 ) {
     @Volatile private var server: ServerSocket? = null
     private val workers = Executors.newCachedThreadPool()
@@ -30,6 +31,8 @@ class BrowserBridge(
                 socketServer.soTimeout = 1000
                 server = socketServer
                 running = true
+                statusHandler("Listening on 127.0.0.1:8789")
+                android.util.Log.i("LoopBrowserBridge", "Listening on 127.0.0.1:8789")
                 while (running && !socketServer.isClosed) {
                     try {
                         val client = socketServer.accept()
@@ -38,6 +41,8 @@ class BrowserBridge(
                 }
             } catch (e: Exception) {
                 running = false
+                val message = "Bridge listener failed: " + (e.message ?: e.javaClass.simpleName)
+                statusHandler(message)
                 android.util.Log.e("LoopBrowserBridge", "Listener failed to bind or accept on 127.0.0.1:8789", e)
             }
         }

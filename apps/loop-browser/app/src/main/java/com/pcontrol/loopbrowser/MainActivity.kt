@@ -365,10 +365,18 @@ class MainActivity : Activity() {
     private fun startBrowserBridge() {
         browserBridge = BrowserBridge(
             tokenProvider = { getPreferences(MODE_PRIVATE).getString("loop_bridge_token", "").orEmpty() },
-            actionHandler = { route, payload -> handleBrowserBridgeAction(route, payload) }
+            actionHandler = { route, payload -> handleBrowserBridgeAction(route, payload) },
+            statusHandler = { message ->
+                runOnUiThread {
+                    bridgeStatus?.text = message
+                    if (message.startsWith("Bridge listener failed")) {
+                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
         ).also { bridge ->
+            bridgeStatus?.text = "Starting MCP listener…"
             bridge.start()
-            bridgeStatus?.text = "MCP bridge started • 127.0.0.1:8789"
         }
     }
 
