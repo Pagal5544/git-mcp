@@ -609,6 +609,75 @@ class MainActivity : Activity() {
             .put("queued", true).put("action", route)
     }
 
+    /**
+     * Inserts plain text into the page's currently focused editable element.
+     * The caller cannot provide JavaScript or a selector; text is JSON-escaped and
+     * inserted only into an input, textarea, or contenteditable element.
+     */
+    private fun typeIntoFocusedElement(text: String) {
+        val safeText = JSONObject.quote(text)
+        val script = """
+            (function() {
+              const el = document.activeElement;
+              if (!el || el.disabled || el.readOnly) {
+                return JSON.stringify({ok:false,error:'no_editable_focused_element'});
+              }
+              const isInput = el instanceof HTMLInputElement &&
+                !['button','submit','reset','checkbox','radio','file','hidden','image'].includes(el.type);
+              const isTextArea = el instanceof HTMLTextAreaElement;
+              const isEditable = el.isContentEditable;
+              if (!(isInput || isTextArea || isEditable)) {
+                return JSON.stringify({ok:false,error:'focus_an_editable_field_first'});
+              }
+              const text = $safeText;
+              if (isEditable) {
+                const inserted = document.execCommand('insertText', false, text);
+                if (!inserted) el.textContent = (el.textContent || '') + text;
+              } else {
+                const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+                const setter = descriptor && descriptor.set;
+                if (!setter) return JSON.stringify({ok:false,error:'field_setter_unavailable'});
+                const value = el.value || '';
+                const start = typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
+                const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : value.length;
+                setter.call(el, value.slice(0, start) + text + value.slice(end));
+                if (typeof el.setSelectionRange === 'function') {
+                  el.setSelectionRange(start + text.length, start + text.length);
+                }
+              }
+              el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
+              el.dispatchEvent(new Event('change', {bubbles:true}));
+              return JSON.stringify({
+                ok:true,
+                fieldType:isInput ? el.type : (isTextArea ? 'textarea' : 'contenteditable'),
+                insertedLength:text.length
+              });
+            })()
+        """.trimIndent()
+        browser.evaluateJavascript(script) { raw ->
+            try {
+                val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+                val result = JSONObject(decoded ?: "{}")
+                if (result.optBoolean("ok")) {
+                    val kind = result.optString("fieldType", "field")
+                    val length = result.optInt("insertedLength", 0)
+                    status.text = "Text entered • $kind • $length characters"
+                    lastAgentAction = "type"
+                    lastAgentActionStatus = "completed"
+                } else {
+                    status.text = "Text entry failed • " + result.optString("error", "field not editable")
+                    lastAgentActionStatus = "rejected_no_editable_field"
+                }
+                lastAgentActionAt = System.currentTimeMillis()
+            } catch (e: Exception) {
+                status.text = "Text entry failed • result unavailable"
+                lastAgentActionStatus = "failed"
+                android.util.Log.w("LoopBrowserBridge", "Unable to parse text-entry result", e)
+            }
+        }
+    }
+
     private fun validTouchPoint(x: Int, y: Int): Boolean =
         ::browser.isInitialized && browser.width > 0 && browser.height > 0 &&
             x >= 0 && y >= 0 && x < browser.width && y < browser.height

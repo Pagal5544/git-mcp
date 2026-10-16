@@ -60,3 +60,10 @@ curl -sS http://127.0.0.1:8789/v1/browser/state
 curl -sS -X POST http://127.0.0.1:8789/v1/browser/agent/step -H 'Content-Type: application/json' -d '{"action":"observe"}'
 curl -sS http://127.0.0.1:8789/v1/browser/state
 ```
+
+### Focused-field text entry
+
+- POST /v1/browser/type with JSON {"text":"plain text"} inserts up to 4,000 characters into the currently focused input, textarea, or contenteditable element.
+- Tap the desired field first with /v1/browser/tap; this endpoint does not choose fields, execute caller-supplied JavaScript, or submit forms.
+- The bridge reports the field type and inserted character count only; it never returns the field contents.
+- Use only on pages and accounts you are authorized to access. CAPTCHA solving and automatic login submission are not provided.
