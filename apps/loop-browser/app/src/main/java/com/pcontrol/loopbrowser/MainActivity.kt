@@ -1,5 +1,4 @@
 package com.pcontrol.loopbrowser
-
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -33,1294 +32,1300 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
 class MainActivity : Activity() {
-    private lateinit var browser: WebView
-    private lateinit var address: EditText
-    private lateinit var progress: ProgressBar
-    private lateinit var status: TextView
-    private lateinit var selectorInput: EditText
-    private lateinit var loopButton: Button
-    private lateinit var desktopButton: Button
-    private lateinit var automationToggle: Button
-    private lateinit var automationPanel: LinearLayout
-    private lateinit var displayRow: LinearLayout
-    private lateinit var addressBar: LinearLayout
-    private lateinit var actionsRow: LinearLayout
-    private lateinit var fullscreenButton: Button
-    private lateinit var stripToggleButton: Button
-    private var stripHidden = false
-    private var fullscreenMode = false
-    private var desktopMode = false
-    @Volatile private var browserZoomFactor = 1.0f
-    private var mobileUserAgent: String = ""
-    private val loopHandler = Handler(Looper.getMainLooper())
-    @Volatile private var loopRunning = false
-    private var observeAutoStarted = false
-    @Volatile private var pageLoading = false
-    @Volatile private var cachedNavigationStatus: String = "idle"
-    @Volatile private var cachedNavigationError: String = ""
-    @Volatile private var cachedNavigationStartedAt: Long = 0L
-    @Volatile private var cachedNavigationFinishedAt: Long = 0L
-    private val navigationTimeoutMs = 15000L
-    @Volatile private var cachedBrowserUrl: String = ""
-    @Volatile private var cachedBrowserTitle: String = ""
-    @Volatile private var cachedBrowserWidth: Int = 0
-    @Volatile private var cachedBrowserHeight: Int = 0
-    @Volatile private var cachedCanGoBack: Boolean = false
-    @Volatile private var cachedCanGoForward: Boolean = false
-    @Volatile private var latestCaptureFileName: String = ""
-    @Volatile private var latestCaptureOk: Boolean = false
-    @Volatile private var latestCaptureTimestamp: Long = 0L
-    private var bridgeStatus: TextView? = null
-    private var browserBridge: BrowserBridge? = null
-    private var loopStep = 0
-    @Volatile private var lastAgentAction = "none"
-    @Volatile private var lastAgentActionStatus = "idle"
-    @Volatile private var lastAgentActionAt = 0L
-    private val allowedAgentActions = setOf("observe", "navigate", "back", "forward", "reload", "capture", "desktop_on", "desktop_off", "stop")
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        buildUi()
-        configureBrowser()
-        startBrowserBridge()
-        browser.loadUrl("https://example.com")
-    }
-
-    private fun buildUi() {
-        window.statusBarColor = 0xFFF5F7FB.toInt()
-        window.navigationBarColor = 0xFFF5F7FB.toInt()
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-            View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFFF5F7FB.toInt())
-            setOnApplyWindowInsetsListener { view, insets ->
-                view.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
-                insets
-            }
+private lateinit var browser: WebView
+private lateinit var address: EditText
+private lateinit var progress: ProgressBar
+private lateinit var status: TextView
+private lateinit var selectorInput: EditText
+private lateinit var loopButton: Button
+private lateinit var desktopButton: Button
+private lateinit var automationToggle: Button
+private lateinit var automationPanel: LinearLayout
+private lateinit var displayRow: LinearLayout
+private lateinit var addressBar: LinearLayout
+private lateinit var actionsRow: LinearLayout
+private lateinit var fullscreenButton: Button
+private lateinit var stripToggleButton: Button
+private var stripHidden = false
+private var fullscreenMode = false
+private var desktopMode = false
+@Volatile private var browserZoomFactor = 1.0f
+private var mobileUserAgent: String = ""
+private val loopHandler = Handler(Looper.getMainLooper())
+@Volatile private var loopRunning = false
+private var observeAutoStarted = false
+@Volatile private var pageLoading = false
+@Volatile private var cachedNavigationStatus: String = "idle"
+@Volatile private var cachedNavigationError: String = ""
+@Volatile private var cachedNavigationStartedAt: Long = 0L
+@Volatile private var cachedNavigationFinishedAt: Long = 0L
+private val navigationTimeoutMs = 15000L
+@Volatile private var cachedBrowserUrl: String = ""
+@Volatile private var cachedBrowserTitle: String = ""
+@Volatile private var cachedBrowserWidth: Int = 0
+@Volatile private var cachedBrowserHeight: Int = 0
+@Volatile private var cachedCanGoBack: Boolean = false
+@Volatile private var cachedCanGoForward: Boolean = false
+@Volatile private var latestCaptureFileName: String = ""
+@Volatile private var latestCaptureOk: Boolean = false
+@Volatile private var latestCaptureTimestamp: Long = 0L
+private var bridgeStatus: TextView? = null
+private var browserBridge: BrowserBridge? = null
+private var loopStep = 0
+@Volatile private var lastAgentAction = "none"
+@Volatile private var lastAgentActionStatus = "idle"
+@Volatile private var lastAgentActionAt = 0L
+private val allowedAgentActions = setOf("observe", "navigate", "back", "forward", "reload", "capture", "desktop_on", "desktop_off", "stop")
+override fun onCreate(savedInstanceState: Bundle?) {
+super.onCreate(savedInstanceState)
+buildUi()
+configureBrowser()
+startBrowserBridge()
+browser.loadUrl("https://example.com")
+}
+private fun buildUi() {
+window.statusBarColor = 0xFFF5F7FB.toInt()
+window.navigationBarColor = 0xFFF5F7FB.toInt()
+window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+val root = LinearLayout(this).apply {
+orientation = LinearLayout.VERTICAL
+setBackgroundColor(0xFFF5F7FB.toInt())
+setOnApplyWindowInsetsListener { view, insets ->
+view.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
+insets
+}
+}
+val bar = LinearLayout(this).apply {
+orientation = LinearLayout.HORIZONTAL
+gravity = android.view.Gravity.CENTER_VERTICAL
+setPadding(6.dp(), 1.dp(), 6.dp(), 1.dp())
+}
+address = EditText(this).apply {
+setSingleLine(true)
+hint = "Enter URL or search"
+setText("https://example.com")
+imeOptions = EditorInfo.IME_ACTION_GO
+textSize = 15f
+setPadding(8.dp(), 0, 6.dp(), 0)
+layoutParams = LinearLayout.LayoutParams(0, 40.dp(), 1f).apply {
+marginEnd = 4.dp()
+}
+}
+bar.addView(address)
+bar.addView(Button(this).apply {
+text = "Go"
+isAllCaps = false
+minWidth = 56.dp()
+layoutParams = LinearLayout.LayoutParams(
+ViewGroup.LayoutParams.WRAP_CONTENT, 38.dp()
+)
+setOnClickListener { navigate(address.text.toString()) }
+})
+addressBar = bar
+root.addView(bar)
+val actions = LinearLayout(this).apply {
+orientation = LinearLayout.HORIZONTAL
+gravity = android.view.Gravity.CENTER_VERTICAL
+setPadding(6.dp(), 0, 6.dp(), 1.dp())
+}
+fun addAction(label: String, action: () -> Unit) {
+actions.addView(Button(this).apply {
+text = label
+isAllCaps = false
+minWidth = 0
+setPadding(4.dp(), 0, 4.dp(), 0)
+layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f).apply {
+marginEnd = 3.dp()
+}
+setOnClickListener { action() }
+})
+}
+addAction("Back") { if (browser.canGoBack()) browser.goBack() }
+addAction("Forward") { if (browser.canGoForward()) browser.goForward() }
+addAction("Reload") { browser.reload() }
+addAction("Capture") { captureViewport() }
+actionsRow = actions
+root.addView(actions)
+displayRow = LinearLayout(this).apply {
+orientation = LinearLayout.HORIZONTAL
+gravity = android.view.Gravity.CENTER_VERTICAL
+setPadding(6.dp(), 0, 6.dp(), 2.dp())
+}
+desktopButton = Button(this).apply {
+text = "Desktop: Off"
+isAllCaps = false
+textSize = 12f
+setPadding(2.dp(), 0, 2.dp(), 0)
+layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f).apply {
+marginEnd = 4.dp()
+}
+setOnClickListener { toggleDesktopMode() }
+}
+displayRow.addView(desktopButton)
+automationToggle = Button(this).apply {
+text = "Tools"
+isAllCaps = false
+textSize = 12f
+setPadding(2.dp(), 0, 2.dp(), 0)
+layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f)
+setOnClickListener {
+val showing = automationPanel.visibility == View.GONE
+automationPanel.visibility = if (showing) View.VISIBLE else View.GONE
+status.visibility = if (showing || loopRunning) View.VISIBLE else View.GONE
+text = if (showing) "Hide tools" else "Tools"
+}
+}
+displayRow.addView(automationToggle)
+fullscreenButton = Button(this).apply {
+text = "Full"
+isAllCaps = false
+textSize = 12f
+setPadding(2.dp(), 0, 2.dp(), 0)
+layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f).apply {
+marginStart = 4.dp()
+}
+setOnClickListener { toggleFullscreen() }
+}
+displayRow.addView(fullscreenButton)
+root.addView(displayRow)
+automationPanel = LinearLayout(this).apply {
+orientation = LinearLayout.VERTICAL
+setPadding(6.dp(), 0, 6.dp(), 1.dp())
+visibility = View.GONE
+}
+selectorInput = EditText(this).apply {
+setSingleLine(true)
+hint = "Optional CSS selector to click each cycle"
+textSize = 14f
+setPadding(8.dp(), 0, 8.dp(), 0)
+layoutParams = LinearLayout.LayoutParams(
+ViewGroup.LayoutParams.MATCH_PARENT, 36.dp()
+)
+}
+automationPanel.addView(selectorInput)
+val zoomActions = LinearLayout(this).apply {
+orientation = LinearLayout.HORIZONTAL
+gravity = android.view.Gravity.CENTER_VERTICAL
+}
+fun addZoomAction(label: String, action: () -> Unit) {
+zoomActions.addView(Button(this).apply {
+text = label
+isAllCaps = false
+minHeight = 40.dp()
+layoutParams = LinearLayout.LayoutParams(0, 40.dp(), 1f).apply {
+marginEnd = 4.dp()
+}
+setOnClickListener { action() }
+})
+}
+addZoomAction("Zoom −") { changeBrowserZoom("out") }
+addZoomAction("Zoom +") { changeBrowserZoom("in") }
+addZoomAction("Reset zoom") { changeBrowserZoom("reset") }
+automationPanel.addView(zoomActions)
+bridgeStatus = TextView(this).apply {
+textSize = 11f
+maxLines = 2
+text = "MCP bridge starting • 127.0.0.1:8789"
+setPadding(4.dp(), 2.dp(), 4.dp(), 3.dp())
+}
+automationPanel.addView(bridgeStatus)
+val loopActions = LinearLayout(this).apply {
+orientation = LinearLayout.HORIZONTAL
+gravity = android.view.Gravity.CENTER_VERTICAL
+}
+loopButton = Button(this).apply {
+text = "Start Observe Loop"
+isAllCaps = false
+minHeight = 44.dp()
+layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f).apply {
+marginEnd = 4.dp()
+}
+setPadding(4.dp(), 0, 4.dp(), 0)
+setOnClickListener { toggleObserveLoop() }
+}
+loopActions.addView(loopButton)
+loopActions.addView(Button(this).apply {
+text = "Observe Now"
+isAllCaps = false
+minHeight = 44.dp()
+layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f)
+setPadding(4.dp(), 0, 4.dp(), 0)
+setOnClickListener { observeAndAct(false) }
+})
+automationPanel.addView(loopActions)
+root.addView(automationPanel)
+progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+max = 100
+visibility = View.GONE
+}
+root.addView(progress, LinearLayout.LayoutParams(
+ViewGroup.LayoutParams.MATCH_PARENT, 3.dp()
+))
+status = TextView(this).apply {
+visibility = View.GONE
+text = "Loop Browser • local prototype"
+setPadding(8.dp(), 2.dp(), 8.dp(), 2.dp())
+textSize = 11f
+maxLines = 1
+ellipsize = android.text.TextUtils.TruncateAt.END
+}
+root.addView(status)
+val browserFrame = android.widget.FrameLayout(this).apply {
+layoutParams = LinearLayout.LayoutParams(
+ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+)
+}
+browser = WebView(this).apply {
+layoutParams = android.widget.FrameLayout.LayoutParams(
+ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+)
+}
+browserFrame.addView(browser)
+stripToggleButton = Button(this).apply {
+text = "×"
+contentDescription = "Hide fullscreen controls"
+isAllCaps = false
+minWidth = 40.dp()
+minHeight = 40.dp()
+setPadding(0, 0, 0, 0)
+visibility = View.GONE
+alpha = 0.92f
+layoutParams = android.widget.FrameLayout.LayoutParams(
+ViewGroup.LayoutParams.MATCH_PARENT, 34.dp(), android.view.Gravity.TOP
+).apply {
+topMargin = 0
+}
+background = android.graphics.drawable.GradientDrawable().apply {
+setColor(0xE6E3E7EE.toInt())
+cornerRadius = 0f
+}
+setOnClickListener { setControlStripHidden(!stripHidden) }
+}
+browserFrame.addView(stripToggleButton)
+root.addView(browserFrame)
+setContentView(root)
+root.requestApplyInsets()
+root.isFocusableInTouchMode = true
+root.requestFocus()
+address.clearFocus()
+address.setOnEditorActionListener { _, actionId, _ ->
+if (actionId == EditorInfo.IME_ACTION_GO) {
+navigate(address.text.toString())
+true
+} else false
+}
+}
+private fun configureBrowser() {
+browser.settings.apply {
+javaScriptEnabled = true
+setSupportZoom(true)
+builtInZoomControls = false
+displayZoomControls = false
+domStorageEnabled = true
+allowFileAccess = false
+allowContentAccess = false
+mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+setSupportMultipleWindows(false)
+javaScriptCanOpenWindowsAutomatically = false
+}
+browser.webChromeClient = object : WebChromeClient() {
+override fun onProgressChanged(view: WebView?, newProgress: Int) {
+progress.progress = newProgress
+progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
+pageLoading = newProgress < 100
+}
+}
+mobileUserAgent = browser.settings.userAgentString
+browser.webViewClient = object : WebViewClient() {
+override fun shouldOverrideUrlLoading(
+view: WebView?, request: WebResourceRequest?
+): Boolean = false
+override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+cachedBrowserUrl = url.orEmpty()
+cachedBrowserTitle = view?.title.orEmpty()
+pageLoading = true
+cachedNavigationStatus = "started"
+cachedNavigationError = ""
+cachedNavigationStartedAt = System.currentTimeMillis()
+cachedNavigationFinishedAt = 0L
+}
+override fun onReceivedError(
+view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?
+) {
+if (request?.isForMainFrame == true) {
+cachedNavigationStatus = "failed"
+cachedNavigationError = "WebView error ${error?.errorCode ?: -1}: ${error?.description ?: "unknown"}"
+cachedNavigationFinishedAt = System.currentTimeMillis()
+pageLoading = false
+android.util.Log.w("LoopBrowserBridge", "Main-frame navigation failed: $cachedNavigationError")
+}
+}
+override fun onPageFinished(view: WebView?, url: String?) {
+cachedNavigationStatus = if (cachedNavigationStatus == "failed") "failed" else "completed"
+cachedNavigationFinishedAt = System.currentTimeMillis()
+cachedBrowserUrl = url.orEmpty()
+cachedBrowserTitle = view?.title.orEmpty()
+cachedBrowserWidth = view?.width ?: 0
+cachedBrowserHeight = view?.height ?: 0
+cachedCanGoBack = view?.canGoBack() ?: false
+cachedCanGoForward = view?.canGoForward() ?: false
+address.setText(url.orEmpty())
+if (desktopMode && view != null) {
+applyDesktopViewport(view)
+}
+status.text = "Ready • " + url.orEmpty()
+// Start observing automatically on the first completed page; no manual tap needed.
+if (!observeAutoStarted) {
+observeAutoStarted = true
+startObserveLoop("page-finished")
+}
+}
+}
+}
+private fun startBrowserBridge() {
+browserBridge = BrowserBridge(
+actionHandler = { route, payload -> handleBrowserBridgeAction(route, payload) },
+screenshotHandler = { readLatestScreenshotForBridge() },
+statusHandler = { message ->
+runOnUiThread {
+bridgeStatus?.text = message
+if (message.startsWith("Bridge listener failed")) {
+Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+}
+}
+}
+).also { bridge ->
+bridgeStatus?.text = "Starting MCP listener…"
+bridge.start()
+}
+}
+private fun readLatestScreenshotForBridge(): ByteArray? {
+if (latestCaptureFileName.isBlank() || !latestCaptureOk) return null
+return try {
+val folder = File(getExternalFilesDir(null), "captures").canonicalFile
+val file = File(folder, latestCaptureFileName).canonicalFile
+if (file.parentFile != folder || !file.isFile || file.length() !in 1..4_194_304L) {
+null
+} else {
+file.readBytes()
+}
+} catch (e: Exception) {
+android.util.Log.e("LoopBrowserBridge", "Unable to read latest screenshot", e)
+null
+}
+}
+private fun handleBrowserBridgeAction(route: String, payload: JSONObject): JSONObject {
+// Validate navigation synchronously so invalid requests are rejected to the caller
+// instead of being acknowledged and leaving navigation telemetry stuck at queued.
+if (route == "POST /v1/browser/navigate") {
+val raw = payload.optString("url", "").trim()
+val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
+val scheme = uri?.scheme?.lowercase()
+if (raw.isBlank() || raw.any { it.isWhitespace() } ||
+(scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
+return JSONObject().put("ok", false)
+.put("error", "Invalid URL: only absolute HTTP/HTTPS URLs with a host are supported")
+}
+}
+// The agent endpoint accepts exactly one allowlisted action per request.
+// It deliberately has no arbitrary JavaScript, CSS-click, shell, or batch-action mode.
+if (route == "POST /v1/browser/agent/step") {
+val action = payload.optString("action", "").trim().lowercase()
+if (action !in allowedAgentActions) {
+return JSONObject().put("ok", false)
+.put("error", "Unsupported agent action; allowed: " + allowedAgentActions.sorted().joinToString(","))
+}
+if (action == "navigate") {
+val raw = payload.optString("url", "").trim()
+val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
+val scheme = uri?.scheme?.lowercase()
+if (raw.isBlank() || raw.any { it.isWhitespace() } ||
+(scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
+return JSONObject().put("ok", false)
+.put("error", "navigate requires an absolute HTTP/HTTPS URL with a host")
+}
+}
+lastAgentAction = action
+lastAgentActionStatus = "queued"
+lastAgentActionAt = System.currentTimeMillis()
+}
+if (route == "POST /v1/browser/zoom") {
+val action = payload.optString("action", "").lowercase()
+val factor = payload.optDouble("factor", 1.1).toFloat()
+if (action !in setOf("in", "out", "reset", "set") ||
+(action == "set" && (!factor.isFinite() || factor !in 0.5f..3.0f))) {
+return JSONObject().put("ok", false)
+.put("error", "zoom action must be in/out/reset or set with factor 0.5..3.0")
+}
+}
+if (route == "POST /v1/browser/type") {
+val text = payload.optString("text", "")
+if (!payload.has("text") || text.length > 4000) {
+return JSONObject().put("ok", false).put("error", "type requires text of at most 4000 characters")
+}
+}
+if (route == "POST /v1/browser/fill") {
+val value = payload.optString("value", "")
+if (!payload.has("value") || value.length > 4000) {
+return JSONObject().put("ok", false).put("error", "fill requires value of at most 4000 characters")
+}
+}
+if (route == "POST /v1/browser/click") {
+val selector = payload.optString("selector", "").trim()
+if (selector.isBlank() || selector.length > 500) return JSONObject().put("ok", false).put("error", "click requires selector")
+}
+if (route == "GET /v1/browser/dom") return inspectInteractiveDom()
+if (route == "POST /v1/browser/dom/search") {
+val query = payload.optString("query", "").trim()
+if (query.isBlank() || query.length > 200) return JSONObject().put("ok", false).put("error", "search requires query (1..200 chars)")
+return searchInteractiveDom(query)
+}
+if (route == "POST /v1/browser/key") {
+val key = payload.optString("key", "").trim().uppercase()
+if (key !in setOf("ENTER", "TAB", "ESCAPE", "BACKSPACE", "SPACE", "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT")) return JSONObject().put("ok", false).put("error", "unsupported key")
+}
+if (route == "POST /v1/browser/select") {
+if (!payload.has("x") || !payload.has("y") ||
+!validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
+return JSONObject().put("ok", false).put("error", "select requires x,y inside the WebView viewport")
+}
+}
+// Validate touch actions against the WebView viewport before queuing them.
+if (route == "POST /v1/browser/tap") {
+if (!payload.has("x") || !payload.has("y") ||
+!validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
+return JSONObject().put("ok", false).put("error", "tap requires x,y inside the WebView viewport")
+}
+}
+if (route == "POST /v1/browser/swipe") {
+val duration = payload.optLong("durationMs", 350L)
+if (!payload.has("x1") || !payload.has("y1") || !payload.has("x2") || !payload.has("y2") ||
+!validTouchPoint(payload.optInt("x1", -1), payload.optInt("y1", -1)) ||
+!validTouchPoint(payload.optInt("x2", -1), payload.optInt("y2", -1)) ||
+duration !in 80L..2000L) {
+return JSONObject().put("ok", false).put("error", "swipe requires valid viewport coordinates and durationMs 80..2000")
+}
+}
+if (route == "POST /v1/browser/scroll") {
+val direction = payload.optString("direction", "").lowercase()
+val amount = payload.optInt("amount", 500)
+if (direction !in setOf("up", "down") || amount !in 80..1200) {
+return JSONObject().put("ok", false).put("error", "scroll requires direction up/down and amount 80..1200")
+}
+}
+// State polling is served from a volatile snapshot and never waits for the UI thread.
+if (route == "GET /v1/browser/state") {
+return JSONObject().put("ok", true)
+.put("url", cachedBrowserUrl)
+.put("title", cachedBrowserTitle)
+.put("loading", pageLoading)
+.put("navigationStatus", if (cachedNavigationStatus == "started" && pageLoading &&
+cachedNavigationStartedAt > 0L &&
+System.currentTimeMillis() - cachedNavigationStartedAt >= navigationTimeoutMs) "timed_out" else cachedNavigationStatus)
+.put("navigationError", cachedNavigationError)
+.put("navigationStartedAt", cachedNavigationStartedAt)
+.put("navigationFinishedAt", cachedNavigationFinishedAt)
+.put("navigationTimeoutMs", navigationTimeoutMs)
+.put("desktopMode", desktopMode)
+.put("zoomFactor", browserZoomFactor.toDouble())
+.put("observeLoopRunning", loopRunning)
+.put("canGoBack", cachedCanGoBack)
+.put("canGoForward", cachedCanGoForward)
+.put("viewportWidth", cachedBrowserWidth)
+.put("viewportHeight", cachedBrowserHeight)
+.put("lastCaptureOk", latestCaptureOk)
+.put("lastCaptureFile", latestCaptureFileName)
+.put("lastCaptureTimestamp", latestCaptureTimestamp)
+.put("agentLastAction", lastAgentAction)
+.put("agentLastActionStatus", lastAgentActionStatus)
+.put("agentLastActionAt", lastAgentActionAt)
+.put("timestamp", System.currentTimeMillis())
+}
+if (route == "GET /health") {
+return JSONObject().put("ok", true).put("bridge", "loop-browser")
+.put("version", 1).put("ready", !isFinishing)
+}
+// Reset navigation telemetry when a navigation-like action is accepted, before
+// it is queued on the UI thread. This prevents an old loading timestamp from
+// making the new request appear timed out while it is still waiting in the queue.
+if (route == "POST /v1/browser/navigate" || route == "POST /v1/browser/reload" ||
+route == "POST /v1/browser/back" || route == "POST /v1/browser/forward" ||
+route == "POST /v1/browser/desktop") {
+cachedNavigationStatus = "queued"
+cachedNavigationError = ""
+cachedNavigationStartedAt = 0L
+cachedNavigationFinishedAt = 0L
+pageLoading = false
+}
+// Do not block the socket worker waiting on Android's main thread. WebView can
+// be busy loading/rendering; queue the operation and acknowledge the request.
+runOnUiThread {
+try {
+when (route) {
+"POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
+"POST /v1/browser/zoom" -> changeBrowserZoom(
+payload.optString("action", "").lowercase(),
+payload.optDouble("factor", 1.1).toFloat()
+)
+"POST /v1/browser/tap" -> {
+val x = payload.optInt("x")
+val y = payload.optInt("y")
+performTouchGesture(x, y, x, y, 80L)
+}
+"POST /v1/browser/type" -> typeIntoFocusedElement(payload.optString("text", ""))
+"POST /v1/browser/fill" -> fillFocusedElement(payload.optString("value", ""))
+"POST /v1/browser/click" -> clickDomSelector(payload.optString("selector", "").trim())
+"POST /v1/browser/key" -> pressBrowserKey(payload.optString("key", "").trim().uppercase())
+"POST /v1/browser/dom/search" -> { /* search is handled synchronously before dispatch */ }
+"POST /v1/browser/select" -> selectWordAt(payload.optInt("x"), payload.optInt("y"))
+"POST /v1/browser/select_all" -> selectAllInFocusedElement()
+"POST /v1/browser/copy" -> copyCurrentSelection()
+"POST /v1/browser/paste" -> {
+val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+val clipText = if (clipboard.hasPrimaryClip() && clipboard.primaryClipDescription?.hasMimeType("text/plain") == true) {
+clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+} else ""
+if (clipText.isEmpty()) {
+lastAgentAction = "paste"
+lastAgentActionStatus = "rejected_empty_clipboard"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Paste skipped • clipboard is empty"
+} else {
+typeIntoFocusedElement(clipText)
+}
+}
+"POST /v1/browser/swipe" -> performTouchGesture(
+payload.optInt("x1"), payload.optInt("y1"),
+payload.optInt("x2"), payload.optInt("y2"),
+payload.optLong("durationMs", 350L)
+)
+"POST /v1/browser/scroll" -> {
+val amount = payload.optInt("amount", 500)
+val centerX = (browser.width / 2).coerceAtLeast(1)
+val startY = if (payload.optString("direction").lowercase() == "down")
+(browser.height * 3 / 4).coerceAtLeast(1) else (browser.height / 4).coerceAtLeast(1)
+val endY = if (payload.optString("direction").lowercase() == "down")
+(startY - amount).coerceAtLeast(1) else (startY + amount).coerceAtMost(browser.height - 1)
+performTouchGesture(centerX, startY, centerX, endY, 350L)
+}
+"POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
+"POST /v1/browser/forward" -> if (::browser.isInitialized && browser.canGoForward()) browser.goForward()
+"POST /v1/browser/desktop" -> {
+val requested = payload.opt("enabled")
+if (requested !is Boolean) {
+android.util.Log.w("LoopBrowserBridge", "Desktop toggle requires boolean enabled")
+} else if (desktopMode != requested) {
+toggleDesktopMode()
+}
+}
+"POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
+"POST /v1/browser/capture" -> {
+val capture = captureViewportForBridge()
+latestCaptureFileName = capture?.name.orEmpty()
+latestCaptureOk = capture != null
+latestCaptureTimestamp = System.currentTimeMillis()
+android.util.Log.i(
+"LoopBrowserBridge",
+"MCP capture completed: ok=$latestCaptureOk file=$latestCaptureFileName"
+)
+}
+"POST /v1/browser/start" -> startObserveLoop("mcp")
+"POST /v1/browser/stop" -> stopObserveLoop("MCP")
+"POST /v1/browser/agent/step" -> {
+val action = payload.optString("action", "").trim().lowercase()
+when (action) {
+"observe" -> {
+lastAgentActionStatus = "completed"
+status.text = "Agent observed current page • " + browser.title.orEmpty()
+}
+"navigate" -> navigate(payload.optString("url", "").trim()).also {
+lastAgentActionStatus = "executed"
+}
+"back" -> {
+if (browser.canGoBack()) { browser.goBack(); lastAgentActionStatus = "executed" }
+else lastAgentActionStatus = "rejected_no_history"
+}
+"forward" -> {
+if (browser.canGoForward()) { browser.goForward(); lastAgentActionStatus = "executed" }
+else lastAgentActionStatus = "rejected_no_forward_history"
+}
+"reload" -> { browser.reload(); lastAgentActionStatus = "executed" }
+"capture" -> {
+val capture = captureViewportForBridge()
+latestCaptureFileName = capture?.name.orEmpty()
+latestCaptureOk = capture != null
+latestCaptureTimestamp = System.currentTimeMillis()
+lastAgentActionStatus = if (capture != null) "completed" else "failed_capture"
+}
+"desktop_on", "desktop_off" -> {
+val requested = action == "desktop_on"
+if (desktopMode != requested) toggleDesktopMode()
+lastAgentActionStatus = "executed"
+}
+"stop" -> { stopObserveLoop("agent"); lastAgentActionStatus = "completed" }
+}
+lastAgentActionAt = System.currentTimeMillis()
+android.util.Log.i("LoopBrowserBridge", "Agent step: action=$action status=$lastAgentActionStatus")
+}
+}
+} catch (e: Exception) {
+android.util.Log.e("LoopBrowserBridge", "Queued action failed: $route", e)
+}
+}
+return JSONObject().put("ok", true).put("accepted", true)
+.put("queued", true).put("action", route)
+}
+private fun inspectInteractiveDom(): JSONObject {
+if (!::browser.isInitialized) return JSONObject().put("ok", false).put("error", "browser_not_ready")
+val latch = CountDownLatch(1)
+var result = JSONObject().put("ok", false).put("error", "dom_inspection_timeout")
+val script = """(function(){
+const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&r.bottom>0&&r.right>0&&r.top{if(e.id)return '#'+e.id;for(const a of ['data-testid','name','aria-label']){const v=e.getAttribute(a);if(v)return e.tagName.toLowerCase()+'['+a+'='+JSON.stringify(v)+']';}const p=[];let n=e;while(n&&n.nodeType===1&&p.length<6){let q=n.tagName.toLowerCase(),par=n.parentElement;if(par){const same=Array.from(par.children).filter(x=>x.tagName===n.tagName);if(same.length>1)q+=':nth-of-type('+(same.indexOf(n)+1)+')';}p.unshift(q);n=par;}return p.join(' > ');};
+return JSON.stringify({ok:true,url:location.href,title:document.title,viewport:{width:innerWidth,height:innerHeight,coordinateSpace:'webview-css-pixels'},count:nodes.length,elements:nodes.map((e,i)=>{const r=e.getBoundingClientRect();return {id:'dom-'+i,tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',label:(e.getAttribute('aria-label')||e.innerText||e.value||e.getAttribute('placeholder')||e.title||'').trim().slice(0,180),text:(e.innerText||e.textContent||'').trim().slice(0,500),value:('value' in e ? String(e.value||'').slice(0,500) : ''),editable:!!(e.isContentEditable||e instanceof HTMLInputElement||e instanceof HTMLTextAreaElement||e.getAttribute('role')==='textbox'),contentEditable:!!e.isContentEditable,placeholder:e.getAttribute('placeholder')||'',type:e.type||'',disabled:!!e.disabled,readOnly:!!e.readOnly,focused:e===document.activeElement,selector:sel(e),rect:{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),centerX:Math.round(r.x+r.width/2),centerY:Math.round(r.y+r.height/2)}};})});
+})()"""
+runOnUiThread { try { browser.evaluateJavascript(script) { raw -> try { result=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()) } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_parse_failed") } finally { latch.countDown() } } } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_inspection_failed"); latch.countDown() } }
+try { latch.await(2500, TimeUnit.MILLISECONDS) } catch (_:InterruptedException) { Thread.currentThread().interrupt() }
+return result
+}
+private fun searchInteractiveDom(query: String): JSONObject {
+if (!::browser.isInitialized) return JSONObject().put("ok", false).put("error", "browser_not_ready")
+val latch = CountDownLatch(1)
+var result = JSONObject().put("ok", false).put("error", "dom_search_timeout")
+val q = JSONObject.quote(query)
+val script = """(function(){const q=$q.toLowerCase();const vis=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};const a=Array.from(document.querySelectorAll('a[href],button,input,textarea,select,[role],[contenteditable="true"],[tabindex]:not([tabindex="-1"])')).filter(vis).map(e=>({e:e,label:(e.getAttribute('aria-label')||e.innerText||e.value||e.placeholder||e.title||'').trim(),selector:e.id?'#'+e.id:(e.getAttribute('data-testid')?e.tagName.toLowerCase()+'[data-testid='+JSON.stringify(e.getAttribute('data-testid'))+']':e.tagName.toLowerCase())})).filter(x=>(x.label+' '+x.selector+' '+x.e.tagName+' '+(x.e.getAttribute('role')||'')).toLowerCase().includes(q)).slice(0,100);return JSON.stringify({ok:true,query:$q,count:a.length,results:a.map((x,i)=>{const r=x.e.getBoundingClientRect();return {id:'match-'+i,tag:x.e.tagName.toLowerCase(),role:x.e.getAttribute('role')||'',label:x.label.slice(0,180),selector:x.selector,rect:{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),centerX:Math.round(r.x+r.width/2),centerY:Math.round(r.y+r.height/2)}}})});})()"""
+runOnUiThread { try { browser.evaluateJavascript(script) { raw -> try { result=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()) } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_search_parse_failed") } finally { latch.countDown() } } } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_search_failed"); latch.countDown() } }
+try { latch.await(2500, TimeUnit.MILLISECONDS) } catch (_:InterruptedException) { Thread.currentThread().interrupt() }
+return result
+}
+private fun pressBrowserKey(name: String) {
+val code = when (name) {
+"ENTER" -> KeyEvent.KEYCODE_ENTER
+"TAB" -> KeyEvent.KEYCODE_TAB
+"ESCAPE" -> KeyEvent.KEYCODE_ESCAPE
+"BACKSPACE" -> KeyEvent.KEYCODE_DEL
+"SPACE" -> KeyEvent.KEYCODE_SPACE
+"ARROW_UP" -> KeyEvent.KEYCODE_DPAD_UP
+"ARROW_DOWN" -> KeyEvent.KEYCODE_DPAD_DOWN
+"ARROW_LEFT" -> KeyEvent.KEYCODE_DPAD_LEFT
+"ARROW_RIGHT" -> KeyEvent.KEYCODE_DPAD_RIGHT
+else -> return
+}
+val now = SystemClock.uptimeMillis()
+val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0)
+val up = KeyEvent(now, SystemClock.uptimeMillis() + 1, KeyEvent.ACTION_UP, code, 0)
+val downHandled = browser.dispatchKeyEvent(down)
+val upHandled = browser.dispatchKeyEvent(up)
+lastAgentAction = "key_$name".lowercase()
+lastAgentActionStatus = if (downHandled || upHandled) "dispatched" else "dispatched_unhandled"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Key $name • " + lastAgentActionStatus
+}
+private fun clickDomSelector(selector: String) {
+if (selector.isBlank() || selector.length > 500) return
+val q=JSONObject.quote(selector)
+val script="""(function(){try{const e=document.querySelector($q);if(!e)return JSON.stringify({ok:false,error:'selector_not_found'});const r=e.getBoundingClientRect(),s=getComputedStyle(e);if(r.width<=0||r.height<=0||s.display==='none'||s.visibility==='hidden')return JSON.stringify({ok:false,error:'element_not_visible'});e.scrollIntoView({block:'center',inline:'center'});e.focus({preventScroll:true});e.click();return JSON.stringify({ok:true,label:(e.getAttribute('aria-label')||e.innerText||e.value||'').trim().slice(0,120)});}catch(x){return JSON.stringify({ok:false,error:'invalid_selector'});}})()"""
+browser.evaluateJavascript(script) { raw -> try { val o=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()); status.text=if(o.optBoolean("ok")) "DOM click • "+o.optString("label") else "DOM click failed • "+o.optString("error") } catch (_:Exception) { status.text="DOM click result unavailable" } }
+}
+/** Selects the word under a viewport-local point; never accepts page-supplied selectors or scripts. */
+private fun selectWordAt(x: Int, y: Int) {
+val script = """
+(function() {
+const x = $x, y = $y;
+let range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) :
+(document.caretPositionFromPoint ? (function(p) {
+if (!p) return null;
+const r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); return r;
+})(document.caretPositionFromPoint(x, y)) : null);
+if (!range || !range.startContainer) return JSON.stringify({ok:false,error:'no_text_at_point'});
+const node = range.startContainer;
+if (node.nodeType !== Node.TEXT_NODE || !node.textContent || !node.textContent.trim())
+return JSON.stringify({ok:false,error:'point_is_not_text'});
+const selection = window.getSelection();
+selection.removeAllRanges();
+selection.addRange(range);
+if (typeof selection.modify === 'function') {
+selection.modify('move', 'backward', 'word');
+selection.modify('extend', 'forward', 'word');
+} else {
+const text = node.textContent, at = range.startOffset;
+let start = at, end = at;
+while (start > 0 && /[\w'-]/.test(text[start-1])) start--;
+while (end < text.length && /[\w'-]/.test(text[end])) end++;
+const wordRange = document.createRange(); wordRange.setStart(node,start); wordRange.setEnd(node,end);
+selection.removeAllRanges(); selection.addRange(wordRange);
+}
+const selected = window.getSelection().toString();
+return JSON.stringify({ok:selected.length>0,error:selected.length ? '' : 'nothing_selected',length:selected.length});
+})()
+""".trimIndent()
+browser.evaluateJavascript(script) { raw -> handleSelectionResult("select", raw) }
+}
+/** Select all text only inside the currently focused editable control. */
+private fun selectAllInFocusedElement() {
+val script = """
+(function() {
+const active = document.activeElement;
+if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
+const closest = (node, selector) => node && node.closest ? node.closest(selector) : null;
+let root = closest(active, '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]');
+if (!root && /github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname)) {
+root = document.querySelector('.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]');
+}
+const el = root || active;
+const input = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el :
+(root && root.querySelector ? root.querySelector('textarea,input') : null);
+if (input && typeof input.select === 'function' && !input.disabled && !input.readOnly) {
+input.focus(); input.select();
+return JSON.stringify({ok:true,length:(input.value || '').length,kind:'form-control'});
+}
+const editable = el.isContentEditable ? el :
+(root && root.querySelector ? root.querySelector('[contenteditable="true"],.cm-content') : null);
+if (editable && (editable.isContentEditable || editable.getAttribute('role') === 'textbox')) {
+editable.focus();
+const selection = window.getSelection();
+const range = document.createRange(); range.selectNodeContents(editable);
+selection.removeAllRanges(); selection.addRange(range);
+const length = selection.toString().length;
+return JSON.stringify({ok:length > 0,length,kind:'contenteditable',error:length ? '' : 'empty_editor'});
+}
+return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : ''});
+})()
+""".trimIndent()
+browser.evaluateJavascript(script) { raw -> handleSelectionResult("select_all", raw) }
+}
+/** Copies only the current explicit selection; clipboard contents are never returned by the bridge. */
+private fun copyCurrentSelection() {
+val script = """
+(function() {
+const el = document.activeElement;
+let text = '';
+if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+typeof el.selectionStart === 'number' && typeof el.selectionEnd === 'number') {
+text = (el.value || '').slice(el.selectionStart, el.selectionEnd);
+} else {
+text = window.getSelection ? window.getSelection().toString() : '';
+}
+return JSON.stringify({ok:text.length>0,length:text.length,text:text,error:text.length ? '' : 'no_selection'});
+})()
+""".trimIndent()
+browser.evaluateJavascript(script) { raw ->
+try {
+val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+val result = JSONObject(decoded ?: "{}")
+if (result.optBoolean("ok")) {
+val clip = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+clip.setPrimaryClip(android.content.ClipData.newPlainText("Loop Browser selection", result.optString("text", "")))
+lastAgentAction = "copy"
+lastAgentActionStatus = "completed"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Copied selected text • " + result.optInt("length", 0) + " characters"
+} else {
+lastAgentAction = "copy"
+lastAgentActionStatus = "rejected_no_selection"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Copy failed • no text selected"
+}
+} catch (e: Exception) {
+lastAgentAction = "copy"
+lastAgentActionStatus = "failed"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Copy failed • result unavailable"
+}
+}
+}
+private fun handleSelectionResult(action: String, raw: String?) {
+try {
+val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+val result = JSONObject(decoded ?: "{}")
+lastAgentAction = action
+lastAgentActionStatus = if (result.optBoolean("ok")) "completed" else "rejected"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = if (result.optBoolean("ok")) {
+"Selection ready • " + result.optInt("length", 0) + " characters"
+} else {
+"Selection failed • " + result.optString("error", "not selectable")
+}
+} catch (e: Exception) {
+lastAgentAction = action
+lastAgentActionStatus = "failed"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Selection failed • result unavailable"
+}
+}
+/**
+* Inserts plain text into the page's currently focused editable element.
+* The caller cannot provide JavaScript or a selector; text is JSON-escaped and
+* inserted only into an input, textarea, or contenteditable element.
+*/
+private fun fillFocusedElement(value: String) {
+    val safeValue = JSONObject.quote(value)
+    val script = """
+    (function() {
+      const active = document.activeElement;
+      if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
+      let el = active;
+      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.isContentEditable) {
+        const root = active.closest ? active.closest('[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]') : null;
+        el = root && (root.matches('[contenteditable="true"],[role="textbox"]') ? root : root.querySelector('[contenteditable="true"],[role="textbox"],textarea,input')) || active;
+      }
+      if (el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'field_disabled_or_readonly'});
+      const value = $safeValue;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+        if (!setter) return JSON.stringify({ok:false,error:'value_setter_unavailable'});
+        setter.call(el, value);
+        if (typeof el.setSelectionRange === 'function') el.setSelectionRange(value.length, value.length);
+        el.dispatchEvent(new InputEvent('input', {bubbles:true,inputType:'insertReplacementText',data:value}));
+        el.dispatchEvent(new Event('change', {bubbles:true}));
+        el.focus();
+        return JSON.stringify({ok:true,kind:el instanceof HTMLTextAreaElement?'textarea':'input',length:value.length,verified:el.value===value});
+      }
+      if (el.isContentEditable || el.getAttribute('role') === 'textbox') {
+        el.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        selection.removeAllRanges(); selection.addRange(range);
+        const ok = document.execCommand('insertText', false, value);
+        if (!ok) {
+          el.textContent = value;
+          el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertReplacementText',data:value}));
         }
-
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(6.dp(), 1.dp(), 6.dp(), 1.dp())
-        }
-        address = EditText(this).apply {
-            setSingleLine(true)
-            hint = "Enter URL or search"
-            setText("https://example.com")
-            imeOptions = EditorInfo.IME_ACTION_GO
-            textSize = 15f
-            setPadding(8.dp(), 0, 6.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, 40.dp(), 1f).apply {
-                marginEnd = 4.dp()
-            }
-        }
-        bar.addView(address)
-        bar.addView(Button(this).apply {
-            text = "Go"
-            isAllCaps = false
-            minWidth = 56.dp()
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, 38.dp()
-            )
-            setOnClickListener { navigate(address.text.toString()) }
-        })
-        addressBar = bar
-        root.addView(bar)
-
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(6.dp(), 0, 6.dp(), 1.dp())
-        }
-        fun addAction(label: String, action: () -> Unit) {
-            actions.addView(Button(this).apply {
-                text = label
-                isAllCaps = false
-                minWidth = 0
-                setPadding(4.dp(), 0, 4.dp(), 0)
-                layoutParams = LinearLayout.LayoutParams(0, 34.dp(), 1f).apply {
-                    marginEnd = 3.dp()
-                }
-                setOnClickListener { action() }
-            })
-        }
-        addAction("Back") { if (browser.canGoBack()) browser.goBack() }
-        addAction("Forward") { if (browser.canGoForward()) browser.goForward() }
-        addAction("Reload") { browser.reload() }
-        addAction("Capture") { captureViewport() }
-        actionsRow = actions
-        root.addView(actions)
-
-        displayRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(6.dp(), 0, 6.dp(), 2.dp())
-        }
-        desktopButton = Button(this).apply {
-            text = "Desktop: Off"
-            isAllCaps = false
-            textSize = 12f
-            setPadding(2.dp(), 0, 2.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f).apply {
-                marginEnd = 4.dp()
-            }
-            setOnClickListener { toggleDesktopMode() }
-        }
-        displayRow.addView(desktopButton)
-        automationToggle = Button(this).apply {
-            text = "Tools"
-            isAllCaps = false
-            textSize = 12f
-            setPadding(2.dp(), 0, 2.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f)
-            setOnClickListener {
-                val showing = automationPanel.visibility == View.GONE
-                automationPanel.visibility = if (showing) View.VISIBLE else View.GONE
-                status.visibility = if (showing || loopRunning) View.VISIBLE else View.GONE
-                text = if (showing) "Hide tools" else "Tools"
-            }
-        }
-        displayRow.addView(automationToggle)
-        fullscreenButton = Button(this).apply {
-            text = "Full"
-            isAllCaps = false
-            textSize = 12f
-            setPadding(2.dp(), 0, 2.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, 38.dp(), 1f).apply {
-                marginStart = 4.dp()
-            }
-            setOnClickListener { toggleFullscreen() }
-        }
-        displayRow.addView(fullscreenButton)
-        root.addView(displayRow)
-
-        automationPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(6.dp(), 0, 6.dp(), 1.dp())
-            visibility = View.GONE
-        }
-        selectorInput = EditText(this).apply {
-            setSingleLine(true)
-            hint = "Optional CSS selector to click each cycle"
-            textSize = 14f
-            setPadding(8.dp(), 0, 8.dp(), 0)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 36.dp()
-            )
-        }
-        automationPanel.addView(selectorInput)
-
-        val zoomActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        fun addZoomAction(label: String, action: () -> Unit) {
-            zoomActions.addView(Button(this).apply {
-                text = label
-                isAllCaps = false
-                minHeight = 40.dp()
-                layoutParams = LinearLayout.LayoutParams(0, 40.dp(), 1f).apply {
-                    marginEnd = 4.dp()
-                }
-                setOnClickListener { action() }
-            })
-        }
-        addZoomAction("Zoom −") { changeBrowserZoom("out") }
-        addZoomAction("Zoom +") { changeBrowserZoom("in") }
-        addZoomAction("Reset zoom") { changeBrowserZoom("reset") }
-        automationPanel.addView(zoomActions)
-
-        bridgeStatus = TextView(this).apply {
-            textSize = 11f
-            maxLines = 2
-            text = "MCP bridge starting • 127.0.0.1:8789"
-            setPadding(4.dp(), 2.dp(), 4.dp(), 3.dp())
-        }
-        automationPanel.addView(bridgeStatus)
-        val loopActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        loopButton = Button(this).apply {
-            text = "Start Observe Loop"
-            isAllCaps = false
-            minHeight = 44.dp()
-            layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f).apply {
-                marginEnd = 4.dp()
-            }
-            setPadding(4.dp(), 0, 4.dp(), 0)
-            setOnClickListener { toggleObserveLoop() }
-        }
-        loopActions.addView(loopButton)
-        loopActions.addView(Button(this).apply {
-            text = "Observe Now"
-            isAllCaps = false
-            minHeight = 44.dp()
-            layoutParams = LinearLayout.LayoutParams(0, 44.dp(), 1f)
-            setPadding(4.dp(), 0, 4.dp(), 0)
-            setOnClickListener { observeAndAct(false) }
-        })
-        automationPanel.addView(loopActions)
-        root.addView(automationPanel)
-
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            visibility = View.GONE
-        }
-        root.addView(progress, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 3.dp()
-        ))
-
-        status = TextView(this).apply {
-            visibility = View.GONE
-            text = "Loop Browser • local prototype"
-            setPadding(8.dp(), 2.dp(), 8.dp(), 2.dp())
-            textSize = 11f
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        root.addView(status)
-
-        val browserFrame = android.widget.FrameLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-            )
-        }
-        browser = WebView(this).apply {
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        }
-        browserFrame.addView(browser)
-        stripToggleButton = Button(this).apply {
-            text = "×"
-            contentDescription = "Hide fullscreen controls"
-            isAllCaps = false
-            minWidth = 40.dp()
-            minHeight = 40.dp()
-            setPadding(0, 0, 0, 0)
-            visibility = View.GONE
-            alpha = 0.92f
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 34.dp(), android.view.Gravity.TOP
-            ).apply {
-                topMargin = 0
-            }
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xE6E3E7EE.toInt())
-                cornerRadius = 0f
-            }
-            setOnClickListener { setControlStripHidden(!stripHidden) }
-        }
-        browserFrame.addView(stripToggleButton)
-        root.addView(browserFrame)
-        setContentView(root)
-        root.requestApplyInsets()
-        root.isFocusableInTouchMode = true
-        root.requestFocus()
-        address.clearFocus()
-
-        address.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_GO) {
-                navigate(address.text.toString())
-                true
-            } else false
-        }
-    }
-
-    private fun configureBrowser() {
-        browser.settings.apply {
-            javaScriptEnabled = true
-            setSupportZoom(true)
-            builtInZoomControls = false
-            displayZoomControls = false
-            domStorageEnabled = true
-            allowFileAccess = false
-            allowContentAccess = false
-            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            setSupportMultipleWindows(false)
-            javaScriptCanOpenWindowsAutomatically = false
-        }
-        browser.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                progress.progress = newProgress
-                progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
-                pageLoading = newProgress < 100
-            }
-        }
-        mobileUserAgent = browser.settings.userAgentString
-        browser.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView?, request: WebResourceRequest?
-            ): Boolean = false
-
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                cachedBrowserUrl = url.orEmpty()
-                cachedBrowserTitle = view?.title.orEmpty()
-                pageLoading = true
-                cachedNavigationStatus = "started"
-                cachedNavigationError = ""
-                cachedNavigationStartedAt = System.currentTimeMillis()
-                cachedNavigationFinishedAt = 0L
-            }
-
-            override fun onReceivedError(
-                view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?
-            ) {
-                if (request?.isForMainFrame == true) {
-                    cachedNavigationStatus = "failed"
-                    cachedNavigationError = "WebView error ${error?.errorCode ?: -1}: ${error?.description ?: "unknown"}"
-                    cachedNavigationFinishedAt = System.currentTimeMillis()
-                    pageLoading = false
-                    android.util.Log.w("LoopBrowserBridge", "Main-frame navigation failed: $cachedNavigationError")
-                }
-            }
-
-            override fun onPageFinished(view: WebView?, url: String?) {
-                cachedNavigationStatus = if (cachedNavigationStatus == "failed") "failed" else "completed"
-                cachedNavigationFinishedAt = System.currentTimeMillis()
-                cachedBrowserUrl = url.orEmpty()
-                cachedBrowserTitle = view?.title.orEmpty()
-                cachedBrowserWidth = view?.width ?: 0
-                cachedBrowserHeight = view?.height ?: 0
-                cachedCanGoBack = view?.canGoBack() ?: false
-                cachedCanGoForward = view?.canGoForward() ?: false
-                address.setText(url.orEmpty())
-                if (desktopMode && view != null) {
-                    applyDesktopViewport(view)
-                }
-                status.text = "Ready • " + url.orEmpty()
-                // Start observing automatically on the first completed page; no manual tap needed.
-                if (!observeAutoStarted) {
-                    observeAutoStarted = true
-                    startObserveLoop("page-finished")
-                }
-            }
-        }
-    }
-
-    private fun startBrowserBridge() {
-        browserBridge = BrowserBridge(
-            actionHandler = { route, payload -> handleBrowserBridgeAction(route, payload) },
-            screenshotHandler = { readLatestScreenshotForBridge() },
-            statusHandler = { message ->
-                runOnUiThread {
-                    bridgeStatus?.text = message
-                    if (message.startsWith("Bridge listener failed")) {
-                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-                    }
-                }
-            }
-        ).also { bridge ->
-            bridgeStatus?.text = "Starting MCP listener…"
-            bridge.start()
-        }
-    }
-
-    private fun readLatestScreenshotForBridge(): ByteArray? {
-        if (latestCaptureFileName.isBlank() || !latestCaptureOk) return null
-        return try {
-            val folder = File(getExternalFilesDir(null), "captures").canonicalFile
-            val file = File(folder, latestCaptureFileName).canonicalFile
-            if (file.parentFile != folder || !file.isFile || file.length() !in 1..4_194_304L) {
-                null
-            } else {
-                file.readBytes()
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("LoopBrowserBridge", "Unable to read latest screenshot", e)
-            null
-        }
-    }
-
-    private fun handleBrowserBridgeAction(route: String, payload: JSONObject): JSONObject {
-        // Validate navigation synchronously so invalid requests are rejected to the caller
-        // instead of being acknowledged and leaving navigation telemetry stuck at queued.
-        if (route == "POST /v1/browser/navigate") {
-            val raw = payload.optString("url", "").trim()
-            val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
-            val scheme = uri?.scheme?.lowercase()
-            if (raw.isBlank() || raw.any { it.isWhitespace() } ||
-                (scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
-                return JSONObject().put("ok", false)
-                    .put("error", "Invalid URL: only absolute HTTP/HTTPS URLs with a host are supported")
-            }
-        }
-
-        // The agent endpoint accepts exactly one allowlisted action per request.
-        // It deliberately has no arbitrary JavaScript, CSS-click, shell, or batch-action mode.
-        if (route == "POST /v1/browser/agent/step") {
-            val action = payload.optString("action", "").trim().lowercase()
-            if (action !in allowedAgentActions) {
-                return JSONObject().put("ok", false)
-                    .put("error", "Unsupported agent action; allowed: " + allowedAgentActions.sorted().joinToString(","))
-            }
-            if (action == "navigate") {
-                val raw = payload.optString("url", "").trim()
-                val uri = try { android.net.Uri.parse(raw) } catch (_: Exception) { null }
-                val scheme = uri?.scheme?.lowercase()
-                if (raw.isBlank() || raw.any { it.isWhitespace() } ||
-                    (scheme != "http" && scheme != "https") || uri?.host.isNullOrBlank()) {
-                    return JSONObject().put("ok", false)
-                        .put("error", "navigate requires an absolute HTTP/HTTPS URL with a host")
-                }
-            }
-            lastAgentAction = action
-            lastAgentActionStatus = "queued"
-            lastAgentActionAt = System.currentTimeMillis()
-        }
-
-        if (route == "POST /v1/browser/zoom") {
-            val action = payload.optString("action", "").lowercase()
-            val factor = payload.optDouble("factor", 1.1).toFloat()
-            if (action !in setOf("in", "out", "reset", "set") ||
-                (action == "set" && (!factor.isFinite() || factor !in 0.5f..3.0f))) {
-                return JSONObject().put("ok", false)
-                    .put("error", "zoom action must be in/out/reset or set with factor 0.5..3.0")
-            }
-        }
-
-        if (route == "POST /v1/browser/type") {
-            val text = payload.optString("text", "")
-            if (!payload.has("text") || text.length > 4000) {
-                return JSONObject().put("ok", false).put("error", "type requires text of at most 4000 characters")
-            }
-        }
-        if (route == "POST /v1/browser/click") {
-            val selector = payload.optString("selector", "").trim()
-            if (selector.isBlank() || selector.length > 500) return JSONObject().put("ok", false).put("error", "click requires selector")
-        }
-        if (route == "GET /v1/browser/dom") return inspectInteractiveDom()
-        if (route == "POST /v1/browser/dom/search") {
-            val query = payload.optString("query", "").trim()
-            if (query.isBlank() || query.length > 200) return JSONObject().put("ok", false).put("error", "search requires query (1..200 chars)")
-            return searchInteractiveDom(query)
-        }
-        if (route == "POST /v1/browser/key") {
-            val key = payload.optString("key", "").trim().uppercase()
-            if (key !in setOf("ENTER", "TAB", "ESCAPE", "BACKSPACE", "SPACE", "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT")) return JSONObject().put("ok", false).put("error", "unsupported key")
-        }
-        if (route == "POST /v1/browser/select") {
-            if (!payload.has("x") || !payload.has("y") ||
-                !validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
-                return JSONObject().put("ok", false).put("error", "select requires x,y inside the WebView viewport")
-            }
-        }
-
-        // Validate touch actions against the WebView viewport before queuing them.
-        if (route == "POST /v1/browser/tap") {
-            if (!payload.has("x") || !payload.has("y") ||
-                !validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
-                return JSONObject().put("ok", false).put("error", "tap requires x,y inside the WebView viewport")
-            }
-        }
-        if (route == "POST /v1/browser/swipe") {
-            val duration = payload.optLong("durationMs", 350L)
-            if (!payload.has("x1") || !payload.has("y1") || !payload.has("x2") || !payload.has("y2") ||
-                !validTouchPoint(payload.optInt("x1", -1), payload.optInt("y1", -1)) ||
-                !validTouchPoint(payload.optInt("x2", -1), payload.optInt("y2", -1)) ||
-                duration !in 80L..2000L) {
-                return JSONObject().put("ok", false).put("error", "swipe requires valid viewport coordinates and durationMs 80..2000")
-            }
-        }
-        if (route == "POST /v1/browser/scroll") {
-            val direction = payload.optString("direction", "").lowercase()
-            val amount = payload.optInt("amount", 500)
-            if (direction !in setOf("up", "down") || amount !in 80..1200) {
-                return JSONObject().put("ok", false).put("error", "scroll requires direction up/down and amount 80..1200")
-            }
-        }
-
-        // State polling is served from a volatile snapshot and never waits for the UI thread.
-        if (route == "GET /v1/browser/state") {
-            return JSONObject().put("ok", true)
-                .put("url", cachedBrowserUrl)
-                .put("title", cachedBrowserTitle)
-                .put("loading", pageLoading)
-                .put("navigationStatus", if (cachedNavigationStatus == "started" && pageLoading &&
-                    cachedNavigationStartedAt > 0L &&
-                    System.currentTimeMillis() - cachedNavigationStartedAt >= navigationTimeoutMs) "timed_out" else cachedNavigationStatus)
-                .put("navigationError", cachedNavigationError)
-                .put("navigationStartedAt", cachedNavigationStartedAt)
-                .put("navigationFinishedAt", cachedNavigationFinishedAt)
-                .put("navigationTimeoutMs", navigationTimeoutMs)
-                .put("desktopMode", desktopMode)
-                .put("zoomFactor", browserZoomFactor.toDouble())
-                .put("observeLoopRunning", loopRunning)
-                .put("canGoBack", cachedCanGoBack)
-                .put("canGoForward", cachedCanGoForward)
-                .put("viewportWidth", cachedBrowserWidth)
-                .put("viewportHeight", cachedBrowserHeight)
-                .put("lastCaptureOk", latestCaptureOk)
-                .put("lastCaptureFile", latestCaptureFileName)
-                .put("lastCaptureTimestamp", latestCaptureTimestamp)
-                .put("agentLastAction", lastAgentAction)
-                .put("agentLastActionStatus", lastAgentActionStatus)
-                .put("agentLastActionAt", lastAgentActionAt)
-                .put("timestamp", System.currentTimeMillis())
-        }
-
-        if (route == "GET /health") {
-            return JSONObject().put("ok", true).put("bridge", "loop-browser")
-                .put("version", 1).put("ready", !isFinishing)
-        }
-
-        // Reset navigation telemetry when a navigation-like action is accepted, before
-        // it is queued on the UI thread. This prevents an old loading timestamp from
-        // making the new request appear timed out while it is still waiting in the queue.
-        if (route == "POST /v1/browser/navigate" || route == "POST /v1/browser/reload" ||
-            route == "POST /v1/browser/back" || route == "POST /v1/browser/forward" ||
-            route == "POST /v1/browser/desktop") {
-            cachedNavigationStatus = "queued"
-            cachedNavigationError = ""
-            cachedNavigationStartedAt = 0L
-            cachedNavigationFinishedAt = 0L
-            pageLoading = false
-        }
-
-        // Do not block the socket worker waiting on Android's main thread. WebView can
-        // be busy loading/rendering; queue the operation and acknowledge the request.
-        runOnUiThread {
-            try {
-                when (route) {
-                    "POST /v1/browser/navigate" -> navigate(payload.optString("url", "").trim())
-                    "POST /v1/browser/zoom" -> changeBrowserZoom(
-                        payload.optString("action", "").lowercase(),
-                        payload.optDouble("factor", 1.1).toFloat()
-                    )
-                    "POST /v1/browser/tap" -> {
-                        val x = payload.optInt("x")
-                        val y = payload.optInt("y")
-                        performTouchGesture(x, y, x, y, 80L)
-                    }
-                    "POST /v1/browser/type" -> typeIntoFocusedElement(payload.optString("text", ""))
-                    "POST /v1/browser/click" -> clickDomSelector(payload.optString("selector", "").trim())
-                    "POST /v1/browser/key" -> pressBrowserKey(payload.optString("key", "").trim().uppercase())
-                    "POST /v1/browser/dom/search" -> { /* search is handled synchronously before dispatch */ }
-                    "POST /v1/browser/select" -> selectWordAt(payload.optInt("x"), payload.optInt("y"))
-                    "POST /v1/browser/select_all" -> selectAllInFocusedElement()
-                    "POST /v1/browser/copy" -> copyCurrentSelection()
-                    "POST /v1/browser/paste" -> {
-                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        val clipText = if (clipboard.hasPrimaryClip() && clipboard.primaryClipDescription?.hasMimeType("text/plain") == true) {
-                            clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
-                        } else ""
-                        if (clipText.isEmpty()) {
-                            lastAgentAction = "paste"
-                            lastAgentActionStatus = "rejected_empty_clipboard"
-                            lastAgentActionAt = System.currentTimeMillis()
-                            status.text = "Paste skipped • clipboard is empty"
-                        } else {
-                            typeIntoFocusedElement(clipText)
-                        }
-                    }
-                    "POST /v1/browser/swipe" -> performTouchGesture(
-                        payload.optInt("x1"), payload.optInt("y1"),
-                        payload.optInt("x2"), payload.optInt("y2"),
-                        payload.optLong("durationMs", 350L)
-                    )
-                    "POST /v1/browser/scroll" -> {
-                        val amount = payload.optInt("amount", 500)
-                        val centerX = (browser.width / 2).coerceAtLeast(1)
-                        val startY = if (payload.optString("direction").lowercase() == "down")
-                            (browser.height * 3 / 4).coerceAtLeast(1) else (browser.height / 4).coerceAtLeast(1)
-                        val endY = if (payload.optString("direction").lowercase() == "down")
-                            (startY - amount).coerceAtLeast(1) else (startY + amount).coerceAtMost(browser.height - 1)
-                        performTouchGesture(centerX, startY, centerX, endY, 350L)
-                    }
-                    "POST /v1/browser/back" -> if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
-                    "POST /v1/browser/forward" -> if (::browser.isInitialized && browser.canGoForward()) browser.goForward()
-                    "POST /v1/browser/desktop" -> {
-                        val requested = payload.opt("enabled")
-                        if (requested !is Boolean) {
-                            android.util.Log.w("LoopBrowserBridge", "Desktop toggle requires boolean enabled")
-                        } else if (desktopMode != requested) {
-                            toggleDesktopMode()
-                        }
-                    }
-                    "POST /v1/browser/reload" -> if (::browser.isInitialized) browser.reload()
-                    "POST /v1/browser/capture" -> {
-                        val capture = captureViewportForBridge()
-                        latestCaptureFileName = capture?.name.orEmpty()
-                        latestCaptureOk = capture != null
-                        latestCaptureTimestamp = System.currentTimeMillis()
-                        android.util.Log.i(
-                            "LoopBrowserBridge",
-                            "MCP capture completed: ok=$latestCaptureOk file=$latestCaptureFileName"
-                        )
-                    }
-                    "POST /v1/browser/start" -> startObserveLoop("mcp")
-                    "POST /v1/browser/stop" -> stopObserveLoop("MCP")
-                    "POST /v1/browser/agent/step" -> {
-                        val action = payload.optString("action", "").trim().lowercase()
-                        when (action) {
-                            "observe" -> {
-                                lastAgentActionStatus = "completed"
-                                status.text = "Agent observed current page • " + browser.title.orEmpty()
-                            }
-                            "navigate" -> navigate(payload.optString("url", "").trim()).also {
-                                lastAgentActionStatus = "executed"
-                            }
-                            "back" -> {
-                                if (browser.canGoBack()) { browser.goBack(); lastAgentActionStatus = "executed" }
-                                else lastAgentActionStatus = "rejected_no_history"
-                            }
-                            "forward" -> {
-                                if (browser.canGoForward()) { browser.goForward(); lastAgentActionStatus = "executed" }
-                                else lastAgentActionStatus = "rejected_no_forward_history"
-                            }
-                            "reload" -> { browser.reload(); lastAgentActionStatus = "executed" }
-                            "capture" -> {
-                                val capture = captureViewportForBridge()
-                                latestCaptureFileName = capture?.name.orEmpty()
-                                latestCaptureOk = capture != null
-                                latestCaptureTimestamp = System.currentTimeMillis()
-                                lastAgentActionStatus = if (capture != null) "completed" else "failed_capture"
-                            }
-                            "desktop_on", "desktop_off" -> {
-                                val requested = action == "desktop_on"
-                                if (desktopMode != requested) toggleDesktopMode()
-                                lastAgentActionStatus = "executed"
-                            }
-                            "stop" -> { stopObserveLoop("agent"); lastAgentActionStatus = "completed" }
-                        }
-                        lastAgentActionAt = System.currentTimeMillis()
-                        android.util.Log.i("LoopBrowserBridge", "Agent step: action=$action status=$lastAgentActionStatus")
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("LoopBrowserBridge", "Queued action failed: $route", e)
-            }
-        }
-        return JSONObject().put("ok", true).put("accepted", true)
-            .put("queued", true).put("action", route)
-    }
-
-
-    private fun inspectInteractiveDom(): JSONObject {
-        if (!::browser.isInitialized) return JSONObject().put("ok", false).put("error", "browser_not_ready")
-        val latch = CountDownLatch(1)
-        var result = JSONObject().put("ok", false).put("error", "dom_inspection_timeout")
-        val script = """(function(){
-          const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth;};
-          const nodes=Array.from(document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="tab"],[role="menuitem"],[contenteditable="true"],[tabindex]:not([tabindex="-1"])')).filter(visible).slice(0,250);
-          const sel=e=>{if(e.id)return '#'+e.id;for(const a of ['data-testid','name','aria-label']){const v=e.getAttribute(a);if(v)return e.tagName.toLowerCase()+'['+a+'='+JSON.stringify(v)+']';}const p=[];let n=e;while(n&&n.nodeType===1&&p.length<6){let q=n.tagName.toLowerCase(),par=n.parentElement;if(par){const same=Array.from(par.children).filter(x=>x.tagName===n.tagName);if(same.length>1)q+=':nth-of-type('+(same.indexOf(n)+1)+')';}p.unshift(q);n=par;}return p.join(' > ');};
-          return JSON.stringify({ok:true,url:location.href,title:document.title,viewport:{width:innerWidth,height:innerHeight,coordinateSpace:'webview-css-pixels'},count:nodes.length,elements:nodes.map((e,i)=>{const r=e.getBoundingClientRect();return {id:'dom-'+i,tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',label:(e.getAttribute('aria-label')||e.innerText||e.value||e.getAttribute('placeholder')||e.title||'').trim().slice(0,180),type:e.type||'',disabled:!!e.disabled,selector:sel(e),rect:{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),centerX:Math.round(r.x+r.width/2),centerY:Math.round(r.y+r.height/2)}};})});
-        })()"""
-        runOnUiThread { try { browser.evaluateJavascript(script) { raw -> try { result=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()) } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_parse_failed") } finally { latch.countDown() } } } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_inspection_failed"); latch.countDown() } }
-        try { latch.await(2500, TimeUnit.MILLISECONDS) } catch (_:InterruptedException) { Thread.currentThread().interrupt() }
-        return result
-    }
-
-
-    private fun searchInteractiveDom(query: String): JSONObject {
-        if (!::browser.isInitialized) return JSONObject().put("ok", false).put("error", "browser_not_ready")
-        val latch = CountDownLatch(1)
-        var result = JSONObject().put("ok", false).put("error", "dom_search_timeout")
-        val q = JSONObject.quote(query)
-        val script = """(function(){const q=$q.toLowerCase();const vis=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};const a=Array.from(document.querySelectorAll('a[href],button,input,textarea,select,[role],[contenteditable="true"],[tabindex]:not([tabindex="-1"])')).filter(vis).map(e=>({e:e,label:(e.getAttribute('aria-label')||e.innerText||e.value||e.placeholder||e.title||'').trim(),selector:e.id?'#'+e.id:(e.getAttribute('data-testid')?e.tagName.toLowerCase()+'[data-testid='+JSON.stringify(e.getAttribute('data-testid'))+']':e.tagName.toLowerCase())})).filter(x=>(x.label+' '+x.selector+' '+x.e.tagName+' '+(x.e.getAttribute('role')||'')).toLowerCase().includes(q)).slice(0,100);return JSON.stringify({ok:true,query:$q,count:a.length,results:a.map((x,i)=>{const r=x.e.getBoundingClientRect();return {id:'match-'+i,tag:x.e.tagName.toLowerCase(),role:x.e.getAttribute('role')||'',label:x.label.slice(0,180),selector:x.selector,rect:{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),centerX:Math.round(r.x+r.width/2),centerY:Math.round(r.y+r.height/2)}}})});})()"""
-        runOnUiThread { try { browser.evaluateJavascript(script) { raw -> try { result=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()) } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_search_parse_failed") } finally { latch.countDown() } } } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_search_failed"); latch.countDown() } }
-        try { latch.await(2500, TimeUnit.MILLISECONDS) } catch (_:InterruptedException) { Thread.currentThread().interrupt() }
-        return result
-    }
-
-    private fun pressBrowserKey(name: String) {
-        val code = when (name) {
-            "ENTER" -> KeyEvent.KEYCODE_ENTER
-            "TAB" -> KeyEvent.KEYCODE_TAB
-            "ESCAPE" -> KeyEvent.KEYCODE_ESCAPE
-            "BACKSPACE" -> KeyEvent.KEYCODE_DEL
-            "SPACE" -> KeyEvent.KEYCODE_SPACE
-            "ARROW_UP" -> KeyEvent.KEYCODE_DPAD_UP
-            "ARROW_DOWN" -> KeyEvent.KEYCODE_DPAD_DOWN
-            "ARROW_LEFT" -> KeyEvent.KEYCODE_DPAD_LEFT
-            "ARROW_RIGHT" -> KeyEvent.KEYCODE_DPAD_RIGHT
-            else -> return
-        }
-        val now = SystemClock.uptimeMillis()
-        val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0)
-        val up = KeyEvent(now, SystemClock.uptimeMillis() + 1, KeyEvent.ACTION_UP, code, 0)
-        val downHandled = browser.dispatchKeyEvent(down)
-        val upHandled = browser.dispatchKeyEvent(up)
-        lastAgentAction = "key_$name".lowercase()
-        lastAgentActionStatus = if (downHandled || upHandled) "dispatched" else "dispatched_unhandled"
-        lastAgentActionAt = System.currentTimeMillis()
-        status.text = "Key $name • " + lastAgentActionStatus
-    }
-
-    private fun clickDomSelector(selector: String) {
-        if (selector.isBlank() || selector.length > 500) return
-        val q=JSONObject.quote(selector)
-        val script="""(function(){try{const e=document.querySelector($q);if(!e)return JSON.stringify({ok:false,error:'selector_not_found'});const r=e.getBoundingClientRect(),s=getComputedStyle(e);if(r.width<=0||r.height<=0||s.display==='none'||s.visibility==='hidden')return JSON.stringify({ok:false,error:'element_not_visible'});e.scrollIntoView({block:'center',inline:'center'});e.focus({preventScroll:true});e.click();return JSON.stringify({ok:true,label:(e.getAttribute('aria-label')||e.innerText||e.value||'').trim().slice(0,120)});}catch(x){return JSON.stringify({ok:false,error:'invalid_selector'});}})()"""
-        browser.evaluateJavascript(script) { raw -> try { val o=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()); status.text=if(o.optBoolean("ok")) "DOM click • "+o.optString("label") else "DOM click failed • "+o.optString("error") } catch (_:Exception) { status.text="DOM click result unavailable" } }
-    }
-
-    /** Selects the word under a viewport-local point; never accepts page-supplied selectors or scripts. */
-    private fun selectWordAt(x: Int, y: Int) {
-        val script = """
-            (function() {
-              const x = $x, y = $y;
-              let range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) :
-                (document.caretPositionFromPoint ? (function(p) {
-                  if (!p) return null;
-                  const r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); return r;
-                })(document.caretPositionFromPoint(x, y)) : null);
-              if (!range || !range.startContainer) return JSON.stringify({ok:false,error:'no_text_at_point'});
-              const node = range.startContainer;
-              if (node.nodeType !== Node.TEXT_NODE || !node.textContent || !node.textContent.trim())
-                return JSON.stringify({ok:false,error:'point_is_not_text'});
-              const selection = window.getSelection();
-              selection.removeAllRanges();
-              selection.addRange(range);
-              if (typeof selection.modify === 'function') {
-                selection.modify('move', 'backward', 'word');
-                selection.modify('extend', 'forward', 'word');
-              } else {
-                const text = node.textContent, at = range.startOffset;
-                let start = at, end = at;
-                while (start > 0 && /[\w'-]/.test(text[start-1])) start--;
-                while (end < text.length && /[\w'-]/.test(text[end])) end++;
-                const wordRange = document.createRange(); wordRange.setStart(node,start); wordRange.setEnd(node,end);
-                selection.removeAllRanges(); selection.addRange(wordRange);
-              }
-              const selected = window.getSelection().toString();
-              return JSON.stringify({ok:selected.length>0,error:selected.length ? '' : 'nothing_selected',length:selected.length});
-            })()
-        """.trimIndent()
-        browser.evaluateJavascript(script) { raw -> handleSelectionResult("select", raw) }
-    }
-
-    /** Select all text only inside the currently focused editable control. */
-    private fun selectAllInFocusedElement() {
-        val script = """
-            (function() {
-              const active = document.activeElement;
-              if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
-              const closest = (node, selector) => node && node.closest ? node.closest(selector) : null;
-              let root = closest(active, '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]');
-              if (!root && /github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname)) {
-                root = document.querySelector('.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"]');
-              }
-              const el = root || active;
-              const input = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el :
-                (root && root.querySelector ? root.querySelector('textarea,input') : null);
-              if (input && typeof input.select === 'function' && !input.disabled && !input.readOnly) {
-                input.focus(); input.select();
-                return JSON.stringify({ok:true,length:(input.value || '').length,kind:'form-control'});
-              }
-              const editable = el.isContentEditable ? el :
-                (root && root.querySelector ? root.querySelector('[contenteditable="true"],.cm-content') : null);
-              if (editable && (editable.isContentEditable || editable.getAttribute('role') === 'textbox')) {
-                editable.focus();
-                const selection = window.getSelection();
-                const range = document.createRange(); range.selectNodeContents(editable);
-                selection.removeAllRanges(); selection.addRange(range);
-                const length = selection.toString().length;
-                return JSON.stringify({ok:length > 0,length,kind:'contenteditable',error:length ? '' : 'empty_editor'});
-              }
-              return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : ''});
-            })()
-        """.trimIndent()
-        browser.evaluateJavascript(script) { raw -> handleSelectionResult("select_all", raw) }
-    }
-
-    /** Copies only the current explicit selection; clipboard contents are never returned by the bridge. */
-    private fun copyCurrentSelection() {
-        val script = """
-            (function() {
-              const el = document.activeElement;
-              let text = '';
-              if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
-                  typeof el.selectionStart === 'number' && typeof el.selectionEnd === 'number') {
-                text = (el.value || '').slice(el.selectionStart, el.selectionEnd);
-              } else {
-                text = window.getSelection ? window.getSelection().toString() : '';
-              }
-              return JSON.stringify({ok:text.length>0,length:text.length,text:text,error:text.length ? '' : 'no_selection'});
-            })()
-        """.trimIndent()
-        browser.evaluateJavascript(script) { raw ->
-            try {
-                val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
-                val result = JSONObject(decoded ?: "{}")
-                if (result.optBoolean("ok")) {
-                    val clip = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    clip.setPrimaryClip(android.content.ClipData.newPlainText("Loop Browser selection", result.optString("text", "")))
-                    lastAgentAction = "copy"
-                    lastAgentActionStatus = "completed"
-                    lastAgentActionAt = System.currentTimeMillis()
-                    status.text = "Copied selected text • " + result.optInt("length", 0) + " characters"
-                } else {
-                    lastAgentAction = "copy"
-                    lastAgentActionStatus = "rejected_no_selection"
-                    lastAgentActionAt = System.currentTimeMillis()
-                    status.text = "Copy failed • no text selected"
-                }
-            } catch (e: Exception) {
-                lastAgentAction = "copy"
-                lastAgentActionStatus = "failed"
-                lastAgentActionAt = System.currentTimeMillis()
-                status.text = "Copy failed • result unavailable"
-            }
-        }
-    }
-
-    private fun handleSelectionResult(action: String, raw: String?) {
+        const actual = el.innerText||el.textContent||'';
+        return JSON.stringify({ok:true,kind:'contenteditable',length:value.length,verified:actual===value,fallback:!ok});
+      }
+      return JSON.stringify({ok:false,error:'focused_element_not_editable',tag:el.tagName||''});
+    })()
+    """.trimIndent()
+    browser.evaluateJavascript(script) { raw ->
         try {
             val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
             val result = JSONObject(decoded ?: "{}")
-            lastAgentAction = action
-            lastAgentActionStatus = if (result.optBoolean("ok")) "completed" else "rejected"
+            lastAgentAction = "fill"
+            lastAgentActionStatus = if (result.optBoolean("ok") && result.optBoolean("verified", false)) "completed_verified" else if (result.optBoolean("ok")) "completed_unverified" else "failed_" + result.optString("error", "unknown")
             lastAgentActionAt = System.currentTimeMillis()
-            status.text = if (result.optBoolean("ok")) {
-                "Selection ready • " + result.optInt("length", 0) + " characters"
-            } else {
-                "Selection failed • " + result.optString("error", "not selectable")
-            }
+            status.text = if (result.optBoolean("ok")) "Field filled • " + result.optString("kind") + " • " + result.optInt("length") + " chars" else "Fill failed • " + result.optString("error")
         } catch (e: Exception) {
-            lastAgentAction = action
-            lastAgentActionStatus = "failed"
+            lastAgentAction = "fill"
+            lastAgentActionStatus = "failed_result_unavailable"
             lastAgentActionAt = System.currentTimeMillis()
-            status.text = "Selection failed • result unavailable"
+            status.text = "Fill failed • result unavailable"
         }
     }
+}
 
-    /**
-     * Inserts plain text into the page's currently focused editable element.
-     * The caller cannot provide JavaScript or a selector; text is JSON-escaped and
-     * inserted only into an input, textarea, or contenteditable element.
-     */
-    private fun typeIntoFocusedElement(text: String) {
-        val safeText = JSONObject.quote(text)
-        val script = """
-            (function() {
-              const active = document.activeElement;
-              if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
-              const editorSelector = '.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea';
-              const editableSelector = '[contenteditable="true"],[role="textbox"],.cm-content,textarea.js-code-editor-input,textarea#textarea';
-              const closestSelector = '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea';
-              let root = active.closest ? active.closest(closestSelector) : null;
-              const isGithubEdit = /(^|\.)github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname);
-              if (!root && isGithubEdit) root = document.querySelector(editorSelector);
-              let el = active;
-              if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && root) {
-                const content = root.matches && root.matches(editableSelector) ? root : root.querySelector('[contenteditable="true"],.cm-content,[role="textbox"],textarea.js-code-editor-input,textarea#textarea');
-                const hiddenInput = root.matches && root.matches('textarea,input') ? root : root.querySelector('textarea,input');
-                el = content || hiddenInput || (active.isContentEditable ? active : null);
-              }
-              // Don't classify CodeMirror's .cm-content by class alone: it must actually accept edits.
-              if (el && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.isContentEditable && !(el.getAttribute && el.getAttribute('role') === 'textbox')) {
-                const content = root && root.querySelector('[contenteditable="true"]');
-                if (content) el = content;
-              }
-              if (!el || el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'no_editable_focused_element',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length,editableCount:document.querySelectorAll(editableSelector).length,rootTag:root && root.tagName || '',rootClass:root && typeof root.className === 'string' ? root.className.slice(0,160) : ''});
-              const isInput = el instanceof HTMLInputElement &&
-                !['button','submit','reset','checkbox','radio','file','hidden','image'].includes(el.type);
-              const isTextArea = el instanceof HTMLTextAreaElement;
-              const isEditable = el.isContentEditable || (el.getAttribute && el.getAttribute('role') === 'textbox');
-              if (!(isInput || isTextArea || isEditable)) return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',targetTag:el.tagName || '',targetRole:el.getAttribute && el.getAttribute('role') || '',targetContentEditable:!!el.isContentEditable,targetClass:typeof el.className === 'string' ? el.className.slice(0,160) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length});
-              el.focus();
-              const text = $safeText;
-              if (isEditable) {
-                // Ensure the browser selection/caret belongs to this editor before inserting.
-                // GitHub can focus the editor root without creating a caret, making execCommand return false.
-                const selection = window.getSelection();
-                const containsSelection = selection && selection.rangeCount > 0 && el.contains(selection.anchorNode);
-                if (!containsSelection && el.isContentEditable) {
-                  const range = document.createRange();
-                  range.selectNodeContents(el);
-                  range.collapse(false);
-                  selection.removeAllRanges();
-                  selection.addRange(range);
-                }
-                el.focus();
-                const inserted = document.execCommand('insertText', false, text);
-                if (!inserted) {
-                  // Some WebView/CodeMirror builds reject execCommand even with a valid caret.
-                  // Apply a local Range edit at the current selection and notify the editor's input observer.
-                  const current = window.getSelection();
-                  if (!current || current.rangeCount === 0 || !current.anchorNode || !el.contains(current.anchorNode)) {
-                    return JSON.stringify({ok:false,error:'editor_insertText_failed_no_editor_caret',editorTag:el.tagName || '',editorClass:typeof el.className === 'string' ? el.className.toString().slice(0,120) : ''});
-                  }
-                  const range = current.getRangeAt(0);
-                  range.deleteContents();
-                  const node = document.createTextNode(text);
-                  range.insertNode(node);
-                  range.setStartAfter(node);
-                  range.collapse(true);
-                  current.removeAllRanges();
-                  current.addRange(range);
-                  el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
-                  if (!el.contains(node)) return JSON.stringify({ok:false,error:'editor_dom_fallback_not_retained'});
-                  return JSON.stringify({ok:true,fieldType:'contenteditable-range-fallback',insertedLength:text.length,fallback:true});
-                }
-              } else {
-                const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-                const setter = descriptor && descriptor.set;
-                if (!setter) return JSON.stringify({ok:false,error:'field_setter_unavailable'});
-                const value = el.value || '';
-                const start = typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
-                const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : value.length;
-                setter.call(el, value.slice(0, start) + text + value.slice(end));
-                if (typeof el.setSelectionRange === 'function') {
-                  el.setSelectionRange(start + text.length, start + text.length);
-                }
-              }
-              el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
-              el.dispatchEvent(new Event('change', {bubbles:true}));
-              return JSON.stringify({
-                ok:true,
-                fieldType:isInput ? el.type : (isTextArea ? 'textarea' : 'contenteditable'),
-                insertedLength:text.length
-              });
-            })()
-        """.trimIndent()
-        browser.evaluateJavascript(script) { raw ->
-            try {
-                val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
-                val result = JSONObject(decoded ?: "{}")
-                if (result.optBoolean("ok")) {
-                    val kind = result.optString("fieldType", "field")
-                    val length = result.optInt("insertedLength", 0)
-                    status.text = "Text entered • $kind • $length characters"
-                    lastAgentAction = "type"
-                    lastAgentActionStatus = "completed"
-                } else {
-                    status.text = "Text entry failed • " + result.optString("error", "field not editable")
-                    lastAgentAction = "type"
-                    lastAgentActionStatus = "rejected_" + result.optString("error", "unknown").replace(Regex("[^A-Za-z0-9_]+"), "_").take(80)
-                    android.util.Log.w("LoopBrowserBridge", "Typing rejected: " + result.toString())
-                }
-                lastAgentActionAt = System.currentTimeMillis()
-            } catch (e: Exception) {
-                status.text = "Text entry failed • result unavailable"
-                lastAgentActionStatus = "failed"
-                android.util.Log.w("LoopBrowserBridge", "Unable to parse text-entry result", e)
-            }
-        }
-    }
-
-    private fun validTouchPoint(x: Int, y: Int): Boolean =
-        ::browser.isInitialized && browser.width > 0 && browser.height > 0 &&
-            x >= 0 && y >= 0 && x < browser.width && y < browser.height
-
-    /** Dispatches a WebView touch sequence in viewport-local pixel coordinates. */
-    private fun performTouchGesture(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long) {
-        if (!validTouchPoint(x1, y1) || !validTouchPoint(x2, y2)) {
-            lastAgentActionStatus = "rejected_invalid_coordinates"
-            return
-        }
-        val downTime = SystemClock.uptimeMillis()
-        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x1.toFloat(), y1.toFloat(), 0)
-        browser.dispatchTouchEvent(down)
-        down.recycle()
-        val steps = if (x1 == x2 && y1 == y2) 1 else 8
-        for (step in 1 until steps) {
-            val delay = durationMs * step / steps
-            loopHandler.postDelayed({
-                if (!::browser.isInitialized || isFinishing) return@postDelayed
-                val fraction = step.toFloat() / steps.toFloat()
-                val x = x1 + ((x2 - x1) * fraction).toInt()
-                val y = y1 + ((y2 - y1) * fraction).toInt()
-                val now = SystemClock.uptimeMillis()
-                val move = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_MOVE, x.toFloat(), y.toFloat(), 0)
-                browser.dispatchTouchEvent(move)
-                move.recycle()
-            }, delay)
-        }
-        loopHandler.postDelayed({
-            if (!::browser.isInitialized || isFinishing) return@postDelayed
-            val now = SystemClock.uptimeMillis()
-            val up = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_UP, x2.toFloat(), y2.toFloat(), 0)
-            browser.dispatchTouchEvent(up)
-            up.recycle()
-            lastAgentAction = if (x1 == x2 && y1 == y2) "tap" else "swipe"
-            lastAgentActionStatus = "dispatched"
-            lastAgentActionAt = System.currentTimeMillis()
-            status.text = "Touch " + lastAgentAction + " dispatched • (" + x2 + "," + y2 + ")"
-            android.util.Log.i("LoopBrowserBridge", "Touch gesture dispatched: action=" + lastAgentAction + " from=(" + x1 + "," + y1 + ") to=(" + x2 + "," + y2 + ")")
-        }, durationMs)
-    }
-
-    private fun captureViewportForBridge(): File? {
-        if (!::browser.isInitialized || browser.width <= 0 || browser.height <= 0) return null
-        return try {
-            val bitmap = Bitmap.createBitmap(browser.width, browser.height, Bitmap.Config.ARGB_8888)
-            browser.draw(Canvas(bitmap))
-            val folder = File(getExternalFilesDir(null), "captures")
-            if (!folder.exists() && !folder.mkdirs()) {
-                bitmap.recycle()
-                return null
-            }
-            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
-            val output = File(folder, "mcp-$stamp.png")
-            val ok = FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            bitmap.recycle()
-            if (ok && output.exists()) output else null
-        } catch (_: Exception) { null }
-    }
-
-    private fun setControlStripHidden(hidden: Boolean) {
-        stripHidden = hidden
-        displayRow.visibility = View.VISIBLE
-        stripToggleButton.visibility = View.GONE
-        stripToggleButton.text = "×"
-        stripToggleButton.contentDescription = "Hide fullscreen controls"
-        stripToggleButton.gravity = android.view.Gravity.CENTER_VERTICAL or if (hidden) android.view.Gravity.END else android.view.Gravity.START
-        stripToggleButton.setPadding(if (hidden) 0 else 12.dp(), 0, if (hidden) 12.dp() else 0, 0)
-    }
-
-    private fun toggleFullscreen() {
-        fullscreenMode = !fullscreenMode
-        addressBar.visibility = if (fullscreenMode) View.GONE else View.VISIBLE
-        actionsRow.visibility = if (fullscreenMode) View.GONE else View.VISIBLE
-        automationPanel.visibility = if (fullscreenMode) View.GONE else
-            if (automationToggle.text == "Hide tools") View.VISIBLE else View.GONE
-        status.visibility = if (fullscreenMode) View.GONE else
-            if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
-        progress.visibility = if (fullscreenMode) View.GONE else progress.visibility
-        fullscreenButton.text = if (fullscreenMode) "Expand" else "Collapse"
-        if (!fullscreenMode) {
-            setControlStripHidden(false)
-        } else {
-            setControlStripHidden(true)
-        }
-        displayRow.setBackgroundColor(if (fullscreenMode) 0xFFE3E7EE.toInt() else 0xFFF5F7FB.toInt())
-        if (fullscreenMode) {
-            address.clearFocus()
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.hideSoftInputFromWindow(address.windowToken, 0)
-        }
-    }
-
-    private fun changeBrowserZoom(action: String, requestedFactor: Float = 1.1f) {
-        if (!::browser.isInitialized) return
-        when (action) {
-            "in" -> {
-                if (browserZoomFactor < 3.0f) {
-                    browser.zoomBy(1.1f)
-                    browserZoomFactor = (browserZoomFactor * 1.1f).coerceAtMost(3.0f)
-                }
-            }
-            "out" -> {
-                if (browserZoomFactor > 0.5f) {
-                    browser.zoomBy(1.0f / 1.1f)
-                    browserZoomFactor = (browserZoomFactor / 1.1f).coerceAtLeast(0.5f)
-                }
-            }
-            "reset" -> {
-                val ratio = 1.0f / browserZoomFactor
-                if (ratio.isFinite() && ratio > 0f) browser.zoomBy(ratio)
-                browserZoomFactor = 1.0f
-            }
-            "set" -> {
-                val target = requestedFactor.coerceIn(0.5f, 3.0f)
-                val ratio = target / browserZoomFactor
-                if (ratio.isFinite() && ratio > 0f) browser.zoomBy(ratio)
-                browserZoomFactor = target
-            }
-            else -> return
-        }
-        lastAgentAction = "zoom_" + action
-        lastAgentActionStatus = "dispatched"
-        lastAgentActionAt = System.currentTimeMillis()
-        status.text = "Browser zoom: " + (browserZoomFactor * 100).toInt() + "%"
-    }
-
-    private fun applyDesktopViewport(view: WebView) {
-        // Request a desktop CSS layout, then scale the 1280px layout down to the phone viewport.
-        val script = "(function(){var d=document;var m=d.querySelector('meta[name=\"viewport\"]');if(!m){m=d.createElement('meta');m.name='viewport';d.head.appendChild(m);}m.setAttribute('content','width=1280');window.dispatchEvent(new Event('resize'));return document.documentElement.clientWidth;})()"
-        view.evaluateJavascript(script) { result ->
-            if (desktopMode && view.width > 0) {
-                val fitPercent = ((view.width.toFloat() / 1280f) * 100f).toInt().coerceIn(25, 100)
-                view.setInitialScale(fitPercent)
-            }
-        }
-    }
-
-    private fun toggleDesktopMode() {
-        desktopMode = !desktopMode
-        browser.settings.apply {
-            useWideViewPort = desktopMode
-            loadWithOverviewMode = desktopMode
-            layoutAlgorithm = WebSettings.LayoutAlgorithm.NORMAL
-            userAgentString = if (desktopMode) {
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            } else {
-                mobileUserAgent
-            }
-        }
-        desktopButton.text = if (desktopMode) "Desktop: On" else "Desktop: Off"
-        val currentUrl = browser.url ?: address.text.toString()
-        if (currentUrl.isNotBlank()) {
-            // Force a fresh navigation after switching UA/viewport so sites such as GitHub
-            // do not keep the previously rendered mobile layout.
-            browser.stopLoading()
-            browser.loadUrl(currentUrl)
-        }
-        status.text = if (desktopMode) "Desktop mode enabled • desktop layout requested • reloading page" else "Mobile mode enabled • reloading page"
-    }
-
-    private fun toggleObserveLoop() {
-        if (loopRunning) stopObserveLoop("user") else startObserveLoop("user")
-    }
-
-    private fun startObserveLoop(source: String) {
-        if (isFinishing || !::browser.isInitialized) return
-        if (loopRunning) return
-        loopRunning = true
-        if (::loopButton.isInitialized) loopButton.text = "Stop Loop"
-        if (::status.isInitialized) {
-            status.visibility = View.VISIBLE
-            status.text = "Observe loop started • source=$source • 5-second interval"
-        }
-        loopStep = 0
-        observeAndAct(true)
-    }
-
-    private fun stopObserveLoop(source: String) {
-        loopRunning = false
-        loopHandler.removeCallbacksAndMessages(null)
-        if (::loopButton.isInitialized) loopButton.text = "Start Observe Loop"
-        if (::status.isInitialized) {
-            status.text = "Observe loop stopped • source=$source"
-            status.visibility = if (::automationPanel.isInitialized && automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
-        }
-    }
-
-    private fun observeAndAct(continueLoop: Boolean) {
-        if (!::browser.isInitialized || isFinishing) return
-        loopStep++
-        val selector = selectorInput.text.toString().trim()
-        val safeSelector = org.json.JSONObject.quote(selector)
-        val script = """
-            (function() {
-              var selector = $safeSelector;
-              var clicked = false;
-              if (selector) {
-                try {
-                  var target = document.querySelector(selector);
-                  if (target) {
-                    target.click();
-                    clicked = true;
-                  }
-                } catch (e) {}
-              }
-              return JSON.stringify({
-                title: document.title || '',
-                url: location.href,
-                readyState: document.readyState,
-                text: (document.body ? document.body.innerText : '').slice(0, 1200),
-                selector: selector,
-                clicked: clicked
-              });
-            })();
-        """.trimIndent()
-        browser.evaluateJavascript(script) { result ->
-            val decoded = try {
-                val raw = if (result == null || result == "null") "{}" else
-                    org.json.JSONTokener(result).nextValue().toString()
-                org.json.JSONObject(raw)
-            } catch (_: Exception) { org.json.JSONObject() }
-            val title = decoded.optString("title", browser.title.orEmpty())
-            val clicked = decoded.optBoolean("clicked", false)
-            status.text = "Loop #$loopStep • " + (if (clicked) "clicked" else "observed") + " • " + title
-            saveViewportCapture("loop-$loopStep")
-            if (continueLoop && loopRunning) {
-                loopHandler.postDelayed({ observeAndAct(true) }, 5000L)
-            }
-        }
-    }
-
-    private fun saveViewportCapture(prefix: String) {
-        if (browser.width <= 0 || browser.height <= 0) return
-        try {
-            val bitmap = Bitmap.createBitmap(browser.width, browser.height, Bitmap.Config.ARGB_8888)
-            browser.draw(Canvas(bitmap))
-            val folder = File(getExternalFilesDir(null), "captures")
-            if (!folder.exists()) folder.mkdirs()
-            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
-            val output = File(folder, "$prefix-$stamp.png")
-            val saved = FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 90, it) }
-            bitmap.recycle()
-            if (saved && output.exists() && output.length() > 0L) {
-                latestCaptureFileName = output.name
-                latestCaptureOk = true
-                latestCaptureTimestamp = System.currentTimeMillis()
-                android.util.Log.i(
-                    "LoopBrowserBridge",
-                    "Observe-loop capture completed: step=$loopStep file=$latestCaptureFileName bytes=${output.length()}"
-                )
-            } else {
-                latestCaptureOk = false
-                latestCaptureTimestamp = System.currentTimeMillis()
-                android.util.Log.w("LoopBrowserBridge", "Observe-loop capture failed: step=$loopStep")
-            }
-        } catch (e: Exception) {
-            latestCaptureOk = false
-            latestCaptureTimestamp = System.currentTimeMillis()
-            android.util.Log.e("LoopBrowserBridge", "Observe-loop capture exception: step=$loopStep", e)
-        }
-    }
-
-    private fun navigate(raw: String) {
-        val input = raw.trim()
-        if (input.isEmpty()) return
-        val candidate = when {
-            input.startsWith("https://", true) || input.startsWith("http://", true) -> input
-            input.contains(" ") || !input.contains(".") ->
-                "https://www.google.com/search?q=" + android.net.Uri.encode(input)
-            else -> "https://$input"
-        }
-        val uri = android.net.Uri.parse(candidate)
-        if (uri.scheme != "https" && uri.scheme != "http") {
-            Toast.makeText(this, "Only HTTP/HTTPS pages are supported", Toast.LENGTH_SHORT).show()
-            return
-        }
-        browser.loadUrl(candidate)
-    }
-
-    private fun captureViewport() {
-        if (!::browser.isInitialized || browser.width <= 0 || browser.height <= 0) {
-            Toast.makeText(this, "Page is not ready yet", Toast.LENGTH_SHORT).show()
-            return
-        }
-        try {
-            val bitmap = Bitmap.createBitmap(browser.width, browser.height, Bitmap.Config.ARGB_8888)
-            browser.draw(Canvas(bitmap))
-            val folder = File(getExternalFilesDir(null), "captures")
-            if (!folder.exists()) folder.mkdirs()
-            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
-            val output = File(folder, "viewport-$stamp.png")
-            FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            bitmap.recycle()
-            status.text = "Captured • " + output.name
-            Toast.makeText(this, "Screenshot saved: " + output.name, Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            status.text = "Capture failed: " + e.javaClass.simpleName
-            Toast.makeText(this, "Screenshot capture failed", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    override fun onDestroy() {
-        loopRunning = false
-        loopHandler.removeCallbacksAndMessages(null)
-        browserBridge?.stop()
-        browserBridge = null
-        if (::browser.isInitialized) browser.destroy()
-        super.onDestroy()
-    }
-
-    @Deprecated("Deprecated in Android API; kept for API 26 compatibility")
-    override fun onBackPressed() {
-        if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
-        else super.onBackPressed()
-    }
-    private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
+private fun typeIntoFocusedElement(text: String) {
+val safeText = JSONObject.quote(text)
+val script = """
+(function() {
+const active = document.activeElement;
+if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
+const editorSelector = '.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea';
+const editableSelector = '[contenteditable="true"],[role="textbox"],.cm-content,textarea.js-code-editor-input,textarea#textarea';
+const closestSelector = '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea';
+let root = active.closest ? active.closest(closestSelector) : null;
+const isGithubEdit = /(^|\.)github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname);
+if (!root && isGithubEdit) root = document.querySelector(editorSelector);
+let el = active;
+if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && root) {
+const content = root.matches && root.matches(editableSelector) ? root : root.querySelector('[contenteditable="true"],.cm-content,[role="textbox"],textarea.js-code-editor-input,textarea#textarea');
+const hiddenInput = root.matches && root.matches('textarea,input') ? root : root.querySelector('textarea,input');
+el = content || hiddenInput || (active.isContentEditable ? active : null);
+}
+// Don't classify CodeMirror's .cm-content by class alone: it must actually accept edits.
+if (el && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.isContentEditable && !(el.getAttribute && el.getAttribute('role') === 'textbox')) {
+const content = root && root.querySelector('[contenteditable="true"]');
+if (content) el = content;
+}
+if (!el || el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'no_editable_focused_element',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length,editableCount:document.querySelectorAll(editableSelector).length,rootTag:root && root.tagName || '',rootClass:root && typeof root.className === 'string' ? root.className.slice(0,160) : ''});
+const isInput = el instanceof HTMLInputElement &&
+!['button','submit','reset','checkbox','radio','file','hidden','image'].includes(el.type);
+const isTextArea = el instanceof HTMLTextAreaElement;
+const isEditable = el.isContentEditable || (el.getAttribute && el.getAttribute('role') === 'textbox');
+if (!(isInput || isTextArea || isEditable)) return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',targetTag:el.tagName || '',targetRole:el.getAttribute && el.getAttribute('role') || '',targetContentEditable:!!el.isContentEditable,targetClass:typeof el.className === 'string' ? el.className.slice(0,160) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length});
+el.focus();
+const text = $safeText;
+if (isEditable) {
+// Ensure the browser selection/caret belongs to this editor before inserting.
+// GitHub can focus the editor root without creating a caret, making execCommand return false.
+const selection = window.getSelection();
+const containsSelection = selection && selection.rangeCount > 0 && el.contains(selection.anchorNode);
+if (!containsSelection && el.isContentEditable) {
+const range = document.createRange();
+range.selectNodeContents(el);
+range.collapse(false);
+selection.removeAllRanges();
+selection.addRange(range);
+}
+el.focus();
+const inserted = document.execCommand('insertText', false, text);
+if (!inserted) {
+// Some WebView/CodeMirror builds reject execCommand even with a valid caret.
+// Apply a local Range edit at the current selection and notify the editor's input observer.
+const current = window.getSelection();
+if (!current || current.rangeCount === 0 || !current.anchorNode || !el.contains(current.anchorNode)) {
+return JSON.stringify({ok:false,error:'editor_insertText_failed_no_editor_caret',editorTag:el.tagName || '',editorClass:typeof el.className === 'string' ? el.className.toString().slice(0,120) : ''});
+}
+const range = current.getRangeAt(0);
+range.deleteContents();
+const node = document.createTextNode(text);
+range.insertNode(node);
+range.setStartAfter(node);
+range.collapse(true);
+current.removeAllRanges();
+current.addRange(range);
+el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
+if (!el.contains(node)) return JSON.stringify({ok:false,error:'editor_dom_fallback_not_retained'});
+return JSON.stringify({ok:true,fieldType:'contenteditable-range-fallback',insertedLength:text.length,fallback:true});
+}
+} else {
+const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+const setter = descriptor && descriptor.set;
+if (!setter) return JSON.stringify({ok:false,error:'field_setter_unavailable'});
+const value = el.value || '';
+const start = typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
+const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : value.length;
+setter.call(el, value.slice(0, start) + text + value.slice(end));
+if (typeof el.setSelectionRange === 'function') {
+el.setSelectionRange(start + text.length, start + text.length);
+}
+}
+el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
+el.dispatchEvent(new Event('change', {bubbles:true}));
+return JSON.stringify({
+ok:true,
+fieldType:isInput ? el.type : (isTextArea ? 'textarea' : 'contenteditable'),
+insertedLength:text.length
+});
+})()
+""".trimIndent()
+browser.evaluateJavascript(script) { raw ->
+try {
+val decoded = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+val result = JSONObject(decoded ?: "{}")
+if (result.optBoolean("ok")) {
+val kind = result.optString("fieldType", "field")
+val length = result.optInt("insertedLength", 0)
+status.text = "Text entered • $kind • $length characters"
+lastAgentAction = "type"
+lastAgentActionStatus = "completed"
+} else {
+status.text = "Text entry failed • " + result.optString("error", "field not editable")
+lastAgentAction = "type"
+lastAgentActionStatus = "rejected_" + result.optString("error", "unknown").replace(Regex("[^A-Za-z0-9_]+"), "_").take(80)
+android.util.Log.w("LoopBrowserBridge", "Typing rejected: " + result.toString())
+}
+lastAgentActionAt = System.currentTimeMillis()
+} catch (e: Exception) {
+status.text = "Text entry failed • result unavailable"
+lastAgentActionStatus = "failed"
+android.util.Log.w("LoopBrowserBridge", "Unable to parse text-entry result", e)
+}
+}
+}
+private fun validTouchPoint(x: Int, y: Int): Boolean =
+::browser.isInitialized && browser.width > 0 && browser.height > 0 &&
+x >= 0 && y >= 0 && x < browser.width && y < browser.height
+/** Dispatches a WebView touch sequence in viewport-local pixel coordinates. */
+private fun performTouchGesture(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long) {
+if (!validTouchPoint(x1, y1) || !validTouchPoint(x2, y2)) {
+lastAgentActionStatus = "rejected_invalid_coordinates"
+return
+}
+val downTime = SystemClock.uptimeMillis()
+val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x1.toFloat(), y1.toFloat(), 0)
+browser.dispatchTouchEvent(down)
+down.recycle()
+val steps = if (x1 == x2 && y1 == y2) 1 else 8
+for (step in 1 until steps) {
+val delay = durationMs * step / steps
+loopHandler.postDelayed({
+if (!::browser.isInitialized || isFinishing) return@postDelayed
+val fraction = step.toFloat() / steps.toFloat()
+val x = x1 + ((x2 - x1) * fraction).toInt()
+val y = y1 + ((y2 - y1) * fraction).toInt()
+val now = SystemClock.uptimeMillis()
+val move = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_MOVE, x.toFloat(), y.toFloat(), 0)
+browser.dispatchTouchEvent(move)
+move.recycle()
+}, delay)
+}
+loopHandler.postDelayed({
+if (!::browser.isInitialized || isFinishing) return@postDelayed
+val now = SystemClock.uptimeMillis()
+val up = MotionEvent.obtain(downTime, now, MotionEvent.ACTION_UP, x2.toFloat(), y2.toFloat(), 0)
+browser.dispatchTouchEvent(up)
+up.recycle()
+lastAgentAction = if (x1 == x2 && y1 == y2) "tap" else "swipe"
+lastAgentActionStatus = "dispatched"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Touch " + lastAgentAction + " dispatched • (" + x2 + "," + y2 + ")"
+android.util.Log.i("LoopBrowserBridge", "Touch gesture dispatched: action=" + lastAgentAction + " from=(" + x1 + "," + y1 + ") to=(" + x2 + "," + y2 + ")")
+}, durationMs)
+}
+private fun captureViewportForBridge(): File? {
+if (!::browser.isInitialized || browser.width <= 0 || browser.height <= 0) return null
+return try {
+val bitmap = Bitmap.createBitmap(browser.width, browser.height, Bitmap.Config.ARGB_8888)
+browser.draw(Canvas(bitmap))
+val folder = File(getExternalFilesDir(null), "captures")
+if (!folder.exists() && !folder.mkdirs()) {
+bitmap.recycle()
+return null
+}
+val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
+val output = File(folder, "mcp-$stamp.png")
+val ok = FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+bitmap.recycle()
+if (ok && output.exists()) output else null
+} catch (_: Exception) { null }
+}
+private fun setControlStripHidden(hidden: Boolean) {
+stripHidden = hidden
+displayRow.visibility = View.VISIBLE
+stripToggleButton.visibility = View.GONE
+stripToggleButton.text = "×"
+stripToggleButton.contentDescription = "Hide fullscreen controls"
+stripToggleButton.gravity = android.view.Gravity.CENTER_VERTICAL or if (hidden) android.view.Gravity.END else android.view.Gravity.START
+stripToggleButton.setPadding(if (hidden) 0 else 12.dp(), 0, if (hidden) 12.dp() else 0, 0)
+}
+private fun toggleFullscreen() {
+fullscreenMode = !fullscreenMode
+addressBar.visibility = if (fullscreenMode) View.GONE else View.VISIBLE
+actionsRow.visibility = if (fullscreenMode) View.GONE else View.VISIBLE
+automationPanel.visibility = if (fullscreenMode) View.GONE else
+if (automationToggle.text == "Hide tools") View.VISIBLE else View.GONE
+status.visibility = if (fullscreenMode) View.GONE else
+if (loopRunning || automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+progress.visibility = if (fullscreenMode) View.GONE else progress.visibility
+fullscreenButton.text = if (fullscreenMode) "Expand" else "Collapse"
+if (!fullscreenMode) {
+setControlStripHidden(false)
+} else {
+setControlStripHidden(true)
+}
+displayRow.setBackgroundColor(if (fullscreenMode) 0xFFE3E7EE.toInt() else 0xFFF5F7FB.toInt())
+if (fullscreenMode) {
+address.clearFocus()
+val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+imm.hideSoftInputFromWindow(address.windowToken, 0)
+}
+}
+private fun changeBrowserZoom(action: String, requestedFactor: Float = 1.1f) {
+if (!::browser.isInitialized) return
+when (action) {
+"in" -> {
+if (browserZoomFactor < 3.0f) {
+browser.zoomBy(1.1f)
+browserZoomFactor = (browserZoomFactor * 1.1f).coerceAtMost(3.0f)
+}
+}
+"out" -> {
+if (browserZoomFactor > 0.5f) {
+browser.zoomBy(1.0f / 1.1f)
+browserZoomFactor = (browserZoomFactor / 1.1f).coerceAtLeast(0.5f)
+}
+}
+"reset" -> {
+val ratio = 1.0f / browserZoomFactor
+if (ratio.isFinite() && ratio > 0f) browser.zoomBy(ratio)
+browserZoomFactor = 1.0f
+}
+"set" -> {
+val target = requestedFactor.coerceIn(0.5f, 3.0f)
+val ratio = target / browserZoomFactor
+if (ratio.isFinite() && ratio > 0f) browser.zoomBy(ratio)
+browserZoomFactor = target
+}
+else -> return
+}
+lastAgentAction = "zoom_" + action
+lastAgentActionStatus = "dispatched"
+lastAgentActionAt = System.currentTimeMillis()
+status.text = "Browser zoom: " + (browserZoomFactor * 100).toInt() + "%"
+}
+private fun applyDesktopViewport(view: WebView) {
+// Request a desktop CSS layout, then scale the 1280px layout down to the phone viewport.
+val script = "(function(){var d=document;var m=d.querySelector('meta[name=\"viewport\"]');if(!m){m=d.createElement('meta');m.name='viewport';d.head.appendChild(m);}m.setAttribute('content','width=1280');window.dispatchEvent(new Event('resize'));return document.documentElement.clientWidth;})()"
+view.evaluateJavascript(script) { result ->
+if (desktopMode && view.width > 0) {
+val fitPercent = ((view.width.toFloat() / 1280f) * 100f).toInt().coerceIn(25, 100)
+view.setInitialScale(fitPercent)
+}
+}
+}
+private fun toggleDesktopMode() {
+desktopMode = !desktopMode
+browser.settings.apply {
+useWideViewPort = desktopMode
+loadWithOverviewMode = desktopMode
+layoutAlgorithm = WebSettings.LayoutAlgorithm.NORMAL
+userAgentString = if (desktopMode) {
+"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+} else {
+mobileUserAgent
+}
+}
+desktopButton.text = if (desktopMode) "Desktop: On" else "Desktop: Off"
+val currentUrl = browser.url ?: address.text.toString()
+if (currentUrl.isNotBlank()) {
+// Force a fresh navigation after switching UA/viewport so sites such as GitHub
+// do not keep the previously rendered mobile layout.
+browser.stopLoading()
+browser.loadUrl(currentUrl)
+}
+status.text = if (desktopMode) "Desktop mode enabled • desktop layout requested • reloading page" else "Mobile mode enabled • reloading page"
+}
+private fun toggleObserveLoop() {
+if (loopRunning) stopObserveLoop("user") else startObserveLoop("user")
+}
+private fun startObserveLoop(source: String) {
+if (isFinishing || !::browser.isInitialized) return
+if (loopRunning) return
+loopRunning = true
+if (::loopButton.isInitialized) loopButton.text = "Stop Loop"
+if (::status.isInitialized) {
+status.visibility = View.VISIBLE
+status.text = "Observe loop started • source=$source • 5-second interval"
+}
+loopStep = 0
+observeAndAct(true)
+}
+private fun stopObserveLoop(source: String) {
+loopRunning = false
+loopHandler.removeCallbacksAndMessages(null)
+if (::loopButton.isInitialized) loopButton.text = "Start Observe Loop"
+if (::status.isInitialized) {
+status.text = "Observe loop stopped • source=$source"
+status.visibility = if (::automationPanel.isInitialized && automationPanel.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+}
+}
+private fun observeAndAct(continueLoop: Boolean) {
+if (!::browser.isInitialized || isFinishing) return
+loopStep++
+val selector = selectorInput.text.toString().trim()
+val safeSelector = org.json.JSONObject.quote(selector)
+val script = """
+(function() {
+var selector = $safeSelector;
+var clicked = false;
+if (selector) {
+try {
+var target = document.querySelector(selector);
+if (target) {
+target.click();
+clicked = true;
+}
+} catch (e) {}
+}
+return JSON.stringify({
+title: document.title || '',
+url: location.href,
+readyState: document.readyState,
+text: (document.body ? document.body.innerText : '').slice(0, 1200),
+selector: selector,
+clicked: clicked
+});
+})();
+""".trimIndent()
+browser.evaluateJavascript(script) { result ->
+val decoded = try {
+val raw = if (result == null || result == "null") "{}" else
+org.json.JSONTokener(result).nextValue().toString()
+org.json.JSONObject(raw)
+} catch (_: Exception) { org.json.JSONObject() }
+val title = decoded.optString("title", browser.title.orEmpty())
+val clicked = decoded.optBoolean("clicked", false)
+status.text = "Loop #$loopStep • " + (if (clicked) "clicked" else "observed") + " • " + title
+saveViewportCapture("loop-$loopStep")
+if (continueLoop && loopRunning) {
+loopHandler.postDelayed({ observeAndAct(true) }, 5000L)
+}
+}
+}
+private fun saveViewportCapture(prefix: String) {
+if (browser.width <= 0 || browser.height <= 0) return
+try {
+val bitmap = Bitmap.createBitmap(browser.width, browser.height, Bitmap.Config.ARGB_8888)
+browser.draw(Canvas(bitmap))
+val folder = File(getExternalFilesDir(null), "captures")
+if (!folder.exists()) folder.mkdirs()
+val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
+val output = File(folder, "$prefix-$stamp.png")
+val saved = FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 90, it) }
+bitmap.recycle()
+if (saved && output.exists() && output.length() > 0L) {
+latestCaptureFileName = output.name
+latestCaptureOk = true
+latestCaptureTimestamp = System.currentTimeMillis()
+android.util.Log.i(
+"LoopBrowserBridge",
+"Observe-loop capture completed: step=$loopStep file=$latestCaptureFileName bytes=${output.length()}"
+)
+} else {
+latestCaptureOk = false
+latestCaptureTimestamp = System.currentTimeMillis()
+android.util.Log.w("LoopBrowserBridge", "Observe-loop capture failed: step=$loopStep")
+}
+} catch (e: Exception) {
+latestCaptureOk = false
+latestCaptureTimestamp = System.currentTimeMillis()
+android.util.Log.e("LoopBrowserBridge", "Observe-loop capture exception: step=$loopStep", e)
+}
+}
+private fun navigate(raw: String) {
+val input = raw.trim()
+if (input.isEmpty()) return
+val candidate = when {
+input.startsWith("https://", true) || input.startsWith("http://", true) -> input
+input.contains(" ") || !input.contains(".") ->
+"https://www.google.com/search?q=" + android.net.Uri.encode(input)
+else -> "https://$input"
+}
+val uri = android.net.Uri.parse(candidate)
+if (uri.scheme != "https" && uri.scheme != "http") {
+Toast.makeText(this, "Only HTTP/HTTPS pages are supported", Toast.LENGTH_SHORT).show()
+return
+}
+browser.loadUrl(candidate)
+}
+private fun captureViewport() {
+if (!::browser.isInitialized || browser.width <= 0 || browser.height <= 0) {
+Toast.makeText(this, "Page is not ready yet", Toast.LENGTH_SHORT).show()
+return
+}
+try {
+val bitmap = Bitmap.createBitmap(browser.width, browser.height, Bitmap.Config.ARGB_8888)
+browser.draw(Canvas(bitmap))
+val folder = File(getExternalFilesDir(null), "captures")
+if (!folder.exists()) folder.mkdirs()
+val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
+val output = File(folder, "viewport-$stamp.png")
+FileOutputStream(output).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+bitmap.recycle()
+status.text = "Captured • " + output.name
+Toast.makeText(this, "Screenshot saved: " + output.name, Toast.LENGTH_SHORT).show()
+} catch (e: Exception) {
+status.text = "Capture failed: " + e.javaClass.simpleName
+Toast.makeText(this, "Screenshot capture failed", Toast.LENGTH_SHORT).show()
+}
+}
+override fun onDestroy() {
+loopRunning = false
+loopHandler.removeCallbacksAndMessages(null)
+browserBridge?.stop()
+browserBridge = null
+if (::browser.isInitialized) browser.destroy()
+super.onDestroy()
+}
+@Deprecated("Deprecated in Android API; kept for API 26 compatibility")
+override fun onBackPressed() {
+if (::browser.isInitialized && browser.canGoBack()) browser.goBack()
+else super.onBackPressed()
+}
+private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
 }
