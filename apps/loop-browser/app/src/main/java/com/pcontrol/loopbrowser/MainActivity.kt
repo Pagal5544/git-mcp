@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.MotionEvent
+import android.view.KeyEvent
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
@@ -495,6 +496,15 @@ class MainActivity : Activity() {
             if (selector.isBlank() || selector.length > 500) return JSONObject().put("ok", false).put("error", "click requires selector")
         }
         if (route == "GET /v1/browser/dom") return inspectInteractiveDom()
+        if (route == "POST /v1/browser/dom/search") {
+            val query = payload.optString("query", "").trim()
+            if (query.isBlank() || query.length > 200) return JSONObject().put("ok", false).put("error", "search requires query (1..200 chars)")
+            return searchInteractiveDom(query)
+        }
+        if (route == "POST /v1/browser/key") {
+            val key = payload.optString("key", "").trim().uppercase()
+            if (key !in setOf("ENTER", "TAB", "ESCAPE", "BACKSPACE", "SPACE", "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT")) return JSONObject().put("ok", false).put("error", "unsupported key")
+        }
         if (route == "POST /v1/browser/select") {
             if (!payload.has("x") || !payload.has("y") ||
                 !validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
@@ -590,6 +600,8 @@ class MainActivity : Activity() {
                     }
                     "POST /v1/browser/type" -> typeIntoFocusedElement(payload.optString("text", ""))
                     "POST /v1/browser/click" -> clickDomSelector(payload.optString("selector", "").trim())
+                    "POST /v1/browser/key" -> pressBrowserKey(payload.optString("key", "").trim().uppercase())
+                    "POST /v1/browser/dom/search" -> { /* search is handled synchronously before dispatch */ }
                     "POST /v1/browser/select" -> selectWordAt(payload.optInt("x"), payload.optInt("y"))
                     "POST /v1/browser/select_all" -> selectAllInFocusedElement()
                     "POST /v1/browser/copy" -> copyCurrentSelection()
@@ -703,6 +715,42 @@ class MainActivity : Activity() {
         runOnUiThread { try { browser.evaluateJavascript(script) { raw -> try { result=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()) } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_parse_failed") } finally { latch.countDown() } } } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_inspection_failed"); latch.countDown() } }
         try { latch.await(2500, TimeUnit.MILLISECONDS) } catch (_:InterruptedException) { Thread.currentThread().interrupt() }
         return result
+    }
+
+
+    private fun searchInteractiveDom(query: String): JSONObject {
+        if (!::browser.isInitialized) return JSONObject().put("ok", false).put("error", "browser_not_ready")
+        val latch = CountDownLatch(1)
+        var result = JSONObject().put("ok", false).put("error", "dom_search_timeout")
+        val q = JSONObject.quote(query)
+        val script = """(function(){const q=$q.toLowerCase();const vis=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};const a=Array.from(document.querySelectorAll('a[href],button,input,textarea,select,[role],[contenteditable="true"],[tabindex]:not([tabindex="-1"])')).filter(vis).map(e=>({e:e,label:(e.getAttribute('aria-label')||e.innerText||e.value||e.placeholder||e.title||'').trim(),selector:e.id?'#'+e.id:(e.getAttribute('data-testid')?e.tagName.toLowerCase()+'[data-testid='+JSON.stringify(e.getAttribute('data-testid'))+']':e.tagName.toLowerCase())})).filter(x=>(x.label+' '+x.selector+' '+x.e.tagName+' '+(x.e.getAttribute('role')||'')).toLowerCase().includes(q)).slice(0,100);return JSON.stringify({ok:true,query:$q,count:a.length,results:a.map((x,i)=>{const r=x.e.getBoundingClientRect();return {id:'match-'+i,tag:x.e.tagName.toLowerCase(),role:x.e.getAttribute('role')||'',label:x.label.slice(0,180),selector:x.selector,rect:{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),centerX:Math.round(r.x+r.width/2),centerY:Math.round(r.y+r.height/2)}}})});})()"""
+        runOnUiThread { try { browser.evaluateJavascript(script) { raw -> try { result=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()) } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_search_parse_failed") } finally { latch.countDown() } } } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_search_failed"); latch.countDown() } }
+        try { latch.await(2500, TimeUnit.MILLISECONDS) } catch (_:InterruptedException) { Thread.currentThread().interrupt() }
+        return result
+    }
+
+    private fun pressBrowserKey(name: String) {
+        val code = when (name) {
+            "ENTER" -> KeyEvent.KEYCODE_ENTER
+            "TAB" -> KeyEvent.KEYCODE_TAB
+            "ESCAPE" -> KeyEvent.KEYCODE_ESCAPE
+            "BACKSPACE" -> KeyEvent.KEYCODE_DEL
+            "SPACE" -> KeyEvent.KEYCODE_SPACE
+            "ARROW_UP" -> KeyEvent.KEYCODE_DPAD_UP
+            "ARROW_DOWN" -> KeyEvent.KEYCODE_DPAD_DOWN
+            "ARROW_LEFT" -> KeyEvent.KEYCODE_DPAD_LEFT
+            "ARROW_RIGHT" -> KeyEvent.KEYCODE_DPAD_RIGHT
+            else -> return
+        }
+        val now = SystemClock.uptimeMillis()
+        val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0)
+        val up = KeyEvent(now, SystemClock.uptimeMillis() + 1, KeyEvent.ACTION_UP, code, 0)
+        val downHandled = browser.dispatchKeyEvent(down)
+        val upHandled = browser.dispatchKeyEvent(up)
+        lastAgentAction = "key_$name".lowercase()
+        lastAgentActionStatus = if (downHandled || upHandled) "dispatched" else "dispatched_unhandled"
+        lastAgentActionAt = System.currentTimeMillis()
+        status.text = "Key $name • " + lastAgentActionStatus
     }
 
     private fun clickDomSelector(selector: String) {
