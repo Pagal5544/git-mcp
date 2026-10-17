@@ -826,22 +826,27 @@ class MainActivity : Activity() {
               if (!active) return JSON.stringify({ok:false,error:'no_focused_element'});
               const editorSelector = '.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea';
               const editableSelector = '[contenteditable="true"],[role="textbox"],.cm-content,textarea.js-code-editor-input,textarea#textarea';
-              let root = active.closest ? active.closest('[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea') : null;
+              const closestSelector = '[contenteditable="true"],[role="textbox"],.cm-editor,.CodeMirror,.monaco-editor,[data-testid="code-editor"],[data-testid="codemirror"],textarea.js-code-editor-input,textarea#textarea';
+              let root = active.closest ? active.closest(closestSelector) : null;
               const isGithubEdit = /(^|\.)github\.com$/.test(location.hostname) && /\/edit\//.test(location.pathname);
-              // GitHub can keep focus on BODY while its CodeMirror surface is visible.
               if (!root && isGithubEdit) root = document.querySelector(editorSelector);
               let el = active;
               if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && root) {
-                const content = (root.matches && root.matches(editableSelector)) ? root : root.querySelector(editableSelector);
+                const content = root.matches && root.matches(editableSelector) ? root : root.querySelector('[contenteditable="true"],.cm-content,[role="textbox"],textarea.js-code-editor-input,textarea#textarea');
                 const hiddenInput = root.matches && root.matches('textarea,input') ? root : root.querySelector('textarea,input');
                 el = content || hiddenInput || (active.isContentEditable ? active : null);
               }
-              if (!el || el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'no_editable_focused_element',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length,editableCount:document.querySelectorAll(editableSelector).length});
+              // Don't classify CodeMirror's .cm-content by class alone: it must actually accept edits.
+              if (el && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !el.isContentEditable && !(el.getAttribute && el.getAttribute('role') === 'textbox')) {
+                const content = root && root.querySelector('[contenteditable="true"]');
+                if (content) el = content;
+              }
+              if (!el || el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'no_editable_focused_element',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length,editableCount:document.querySelectorAll(editableSelector).length,rootTag:root && root.tagName || '',rootClass:root && typeof root.className === 'string' ? root.className.slice(0,160) : ''});
               const isInput = el instanceof HTMLInputElement &&
                 !['button','submit','reset','checkbox','radio','file','hidden','image'].includes(el.type);
               const isTextArea = el instanceof HTMLTextAreaElement;
               const isEditable = el.isContentEditable || (el.getAttribute && el.getAttribute('role') === 'textbox');
-              if (!(isInput || isTextArea || isEditable)) return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : ''});
+              if (!(isInput || isTextArea || isEditable)) return JSON.stringify({ok:false,error:'rejected_no_editable_field',activeTag:active.tagName || '',activeRole:active.getAttribute && active.getAttribute('role') || '',activeClass:typeof active.className === 'string' ? active.className.slice(0,120) : '',targetTag:el.tagName || '',targetRole:el.getAttribute && el.getAttribute('role') || '',targetContentEditable:!!el.isContentEditable,targetClass:typeof el.className === 'string' ? el.className.slice(0,160) : '',githubEdit:isGithubEdit,editorCount:document.querySelectorAll(editorSelector).length});
               el.focus();
               const text = $safeText;
               if (isEditable) {
