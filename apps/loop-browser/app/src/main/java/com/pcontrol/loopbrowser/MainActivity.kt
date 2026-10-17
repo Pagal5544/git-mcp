@@ -863,7 +863,25 @@ class MainActivity : Activity() {
                 }
                 el.focus();
                 const inserted = document.execCommand('insertText', false, text);
-                if (!inserted) return JSON.stringify({ok:false,error:'editor_insertText_failed',hasSelection:!!(selection && selection.rangeCount),selectionInside:!!(selection && selection.anchorNode && el.contains(selection.anchorNode)),editorTag:el.tagName || '',editorClass:typeof el.className === 'string' ? el.className.toString().slice(0,120) : ''});
+                if (!inserted) {
+                  // Some WebView/CodeMirror builds reject execCommand even with a valid caret.
+                  // Apply a local Range edit at the current selection and notify the editor's input observer.
+                  const current = window.getSelection();
+                  if (!current || current.rangeCount === 0 || !current.anchorNode || !el.contains(current.anchorNode)) {
+                    return JSON.stringify({ok:false,error:'editor_insertText_failed_no_editor_caret',editorTag:el.tagName || '',editorClass:typeof el.className === 'string' ? el.className.toString().slice(0,120) : ''});
+                  }
+                  const range = current.getRangeAt(0);
+                  range.deleteContents();
+                  const node = document.createTextNode(text);
+                  range.insertNode(node);
+                  range.setStartAfter(node);
+                  range.collapse(true);
+                  current.removeAllRanges();
+                  current.addRange(range);
+                  el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
+                  if (!el.contains(node)) return JSON.stringify({ok:false,error:'editor_dom_fallback_not_retained'});
+                  return JSON.stringify({ok:true,fieldType:'contenteditable-range-fallback',insertedLength:text.length,fallback:true});
+                }
               } else {
                 const proto = isTextArea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
                 const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
