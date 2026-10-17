@@ -90,8 +90,8 @@ class BrowserBridge(
                 val route = first[1].substringBefore("?")
                 val key = first[0] + " " + route
                 val allowed = setOf(
-                    "GET /health", "GET /v1/browser/state", "GET /v1/browser/screenshot",
-                    "POST /v1/browser/navigate", "POST /v1/browser/zoom", "POST /v1/browser/tap", "POST /v1/browser/swipe", "POST /v1/browser/scroll", "POST /v1/browser/type", "POST /v1/browser/select", "POST /v1/browser/select_all", "POST /v1/browser/copy", "POST /v1/browser/paste", "POST /v1/browser/back",
+                    "GET /health", "GET /v1/browser/state", "GET /v1/browser/dom", "GET /v1/browser/screenshot",
+                    "POST /v1/browser/navigate", "POST /v1/browser/click", "POST /v1/browser/zoom", "POST /v1/browser/tap", "POST /v1/browser/swipe", "POST /v1/browser/scroll", "POST /v1/browser/type", "POST /v1/browser/select", "POST /v1/browser/select_all", "POST /v1/browser/copy", "POST /v1/browser/paste", "POST /v1/browser/back",
                     "POST /v1/browser/forward", "POST /v1/browser/desktop",
                     "POST /v1/browser/reload", "POST /v1/browser/capture",
                     "POST /v1/browser/start", "POST /v1/browser/stop", "POST /v1/browser/agent/step"

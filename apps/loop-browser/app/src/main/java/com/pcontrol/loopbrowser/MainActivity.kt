@@ -490,6 +490,11 @@ class MainActivity : Activity() {
                 return JSONObject().put("ok", false).put("error", "type requires text of at most 4000 characters")
             }
         }
+        if (route == "POST /v1/browser/click") {
+            val selector = payload.optString("selector", "").trim()
+            if (selector.isBlank() || selector.length > 500) return JSONObject().put("ok", false).put("error", "click requires selector")
+        }
+        if (route == "GET /v1/browser/dom") return inspectInteractiveDom()
         if (route == "POST /v1/browser/select") {
             if (!payload.has("x") || !payload.has("y") ||
                 !validTouchPoint(payload.optInt("x", -1), payload.optInt("y", -1))) {
@@ -584,6 +589,7 @@ class MainActivity : Activity() {
                         performTouchGesture(x, y, x, y, 80L)
                     }
                     "POST /v1/browser/type" -> typeIntoFocusedElement(payload.optString("text", ""))
+                    "POST /v1/browser/click" -> clickDomSelector(payload.optString("selector", "").trim())
                     "POST /v1/browser/select" -> selectWordAt(payload.optInt("x"), payload.optInt("y"))
                     "POST /v1/browser/select_all" -> selectAllInFocusedElement()
                     "POST /v1/browser/copy" -> copyCurrentSelection()
@@ -681,6 +687,29 @@ class MainActivity : Activity() {
         }
         return JSONObject().put("ok", true).put("accepted", true)
             .put("queued", true).put("action", route)
+    }
+
+
+    private fun inspectInteractiveDom(): JSONObject {
+        if (!::browser.isInitialized) return JSONObject().put("ok", false).put("error", "browser_not_ready")
+        val latch = CountDownLatch(1)
+        var result = JSONObject().put("ok", false).put("error", "dom_inspection_timeout")
+        val script = """(function(){
+          const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth;};
+          const nodes=Array.from(document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="tab"],[role="menuitem"],[contenteditable="true"],[tabindex]:not([tabindex="-1"])')).filter(visible).slice(0,250);
+          const sel=e=>{if(e.id)return '#'+e.id;for(const a of ['data-testid','name','aria-label']){const v=e.getAttribute(a);if(v)return e.tagName.toLowerCase()+'['+a+'='+JSON.stringify(v)+']';}const p=[];let n=e;while(n&&n.nodeType===1&&p.length<6){let q=n.tagName.toLowerCase(),par=n.parentElement;if(par){const same=Array.from(par.children).filter(x=>x.tagName===n.tagName);if(same.length>1)q+=':nth-of-type('+(same.indexOf(n)+1)+')';}p.unshift(q);n=par;}return p.join(' > ');};
+          return JSON.stringify({ok:true,url:location.href,title:document.title,viewport:{width:innerWidth,height:innerHeight,coordinateSpace:'webview-css-pixels'},count:nodes.length,elements:nodes.map((e,i)=>{const r=e.getBoundingClientRect();return {id:'dom-'+i,tag:e.tagName.toLowerCase(),role:e.getAttribute('role')||'',label:(e.getAttribute('aria-label')||e.innerText||e.value||e.getAttribute('placeholder')||e.title||'').trim().slice(0,180),type:e.type||'',disabled:!!e.disabled,selector:sel(e),rect:{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),centerX:Math.round(r.x+r.width/2),centerY:Math.round(r.y+r.height/2)}};})});
+        })()"""
+        runOnUiThread { try { browser.evaluateJavascript(script) { raw -> try { result=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()) } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_parse_failed") } finally { latch.countDown() } } } catch (_:Exception) { result=JSONObject().put("ok",false).put("error","dom_inspection_failed"); latch.countDown() } }
+        try { latch.await(2500, TimeUnit.MILLISECONDS) } catch (_:InterruptedException) { Thread.currentThread().interrupt() }
+        return result
+    }
+
+    private fun clickDomSelector(selector: String) {
+        if (selector.isBlank() || selector.length > 500) return
+        val q=JSONObject.quote(selector)
+        val script="""(function(){try{const e=document.querySelector($q);if(!e)return JSON.stringify({ok:false,error:'selector_not_found'});const r=e.getBoundingClientRect(),s=getComputedStyle(e);if(r.width<=0||r.height<=0||s.display==='none'||s.visibility==='hidden')return JSON.stringify({ok:false,error:'element_not_visible'});e.scrollIntoView({block:'center',inline:'center'});e.focus({preventScroll:true});e.click();return JSON.stringify({ok:true,label:(e.getAttribute('aria-label')||e.innerText||e.value||'').trim().slice(0,120)});}catch(x){return JSON.stringify({ok:false,error:'invalid_selector'});}})()"""
+        browser.evaluateJavascript(script) { raw -> try { val o=JSONObject(org.json.JSONTokener(raw ?: "{}").nextValue().toString()); status.text=if(o.optBoolean("ok")) "DOM click • "+o.optString("label") else "DOM click failed • "+o.optString("error") } catch (_:Exception) { status.text="DOM click result unavailable" } }
     }
 
     /** Selects the word under a viewport-local point; never accepts page-supplied selectors or scripts. */
