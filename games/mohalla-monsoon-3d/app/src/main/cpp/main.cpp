@@ -22,9 +22,12 @@
 #include <thread>
 #include <vector>
 #include <functional>
+#include <climits>
 
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "third_party/stb_image.h"
 
 #define MM_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "MohallaMonsoon", __VA_ARGS__)
 #define MM_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "MohallaMonsoon", __VA_ARGS__)
@@ -140,7 +143,7 @@ struct RiggedCharacter {
     std::vector<Vertex> animatedVertices; std::vector<uint16_t> indices; std::vector<Mat4> inverseBind,nodeWorld;
     std::vector<Vec3> translations,scales; std::vector<std::array<float,4>> rotations; Mesh mesh;
     cgltf_node* meshNode=nullptr; cgltf_skin* skin=nullptr; cgltf_animation* animation=nullptr;
-    float duration=0,modelScale=1,minY=0,centerX=0,centerZ=0; bool ready=false;
+    float duration=0,modelScale=1,minY=0,centerX=0,centerZ=0; GLuint texture=0; bool ready=false;
     static Mat4 fromM(const float* a){ Mat4 r; std::copy(a,a+16,r.m.begin()); return r; }
     static Mat4 quatM(const std::array<float,4>& q){
         const float x=q[0],y=q[1],z=q[2],w=q[3]; Mat4 m=Mat4::identity();
@@ -163,6 +166,29 @@ struct RiggedCharacter {
         if(off!=fileBytes.size()){fileBytes.clear();return false;}
         cgltf_options opt{};if(cgltf_parse(&opt,fileBytes.data(),fileBytes.size(),&data)!=cgltf_result_success||!data){destroy();return false;}
         if(cgltf_load_buffers(&opt,data,nullptr)!=cgltf_result_success){destroy();return false;}
+        // Decode the embedded glTF base-colour texture so skin and clothing keep their authored detail.
+        for(cgltf_size mi=0;mi<data->materials_count && !texture;mi++) {
+            cgltf_texture* tex=data->materials[mi].pbr_metallic_roughness.base_color_texture.texture;
+            cgltf_image* image=tex?tex->image:nullptr;
+            if(!image || !image->buffer_view || !image->buffer_view->buffer || !image->buffer_view->buffer->data) continue;
+            cgltf_buffer_view* view=image->buffer_view;
+            if(view->size==0 || view->size>static_cast<cgltf_size>(INT_MAX)) continue;
+            const unsigned char* encoded=static_cast<const unsigned char*>(view->buffer->data)+view->offset;
+            int iw=0,ih=0,channels=0;
+            stbi_set_flip_vertically_on_load(1);
+            unsigned char* pixels=stbi_load_from_memory(encoded,static_cast<int>(view->size),&iw,&ih,&channels,STBI_rgb_alpha);
+            if(!pixels || iw<=0 || ih<=0) { if(pixels) stbi_image_free(pixels); continue; }
+            glGenTextures(1,&texture); glBindTexture(GL_TEXTURE_2D,texture);
+            glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,iw,ih,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+            glGenerateMipmap(GL_TEXTURE_2D);
+            stbi_image_free(pixels);
+            if(glGetError()!=GL_NO_ERROR) { glDeleteTextures(1,&texture); texture=0; }
+        }
+        if(!texture) MM_LOGE("GLB embedded base-colour texture unavailable; using fabric fallback");
         for(cgltf_size i=0;i<data->nodes_count;i++)if(data->nodes[i].mesh&&data->nodes[i].skin){meshNode=&data->nodes[i];skin=meshNode->skin;break;}
         if(!meshNode||!skin||!skin->joints_count||!meshNode->mesh||!meshNode->mesh->primitives_count){destroy();return false;}
         const cgltf_primitive* p=&meshNode->mesh->primitives[0];
@@ -227,7 +253,7 @@ struct RiggedCharacter {
             if(sum<1e-5f){pp=p;nn=n;}animatedVertices[i]=v.base;animatedVertices[i].px=pp.x;animatedVertices[i].py=pp.y;animatedVertices[i].pz=pp.z;Vec3 N=normalize(nn);animatedVertices[i].nx=N.x;animatedVertices[i].ny=N.y;animatedVertices[i].nz=N.z;}
         glBindBuffer(GL_ARRAY_BUFFER,mesh.vbo);glBufferSubData(GL_ARRAY_BUFFER,0,animatedVertices.size()*sizeof(Vertex),animatedVertices.data());glBindBuffer(GL_ARRAY_BUFFER,0);
     }
-    void destroy(){if(mesh.vbo||mesh.ibo)mesh.destroy();if(data)cgltf_free(data);data=nullptr;fileBytes.clear();bindVertices.clear();animatedVertices.clear();indices.clear();inverseBind.clear();nodeWorld.clear();translations.clear();scales.clear();rotations.clear();meshNode=nullptr;skin=nullptr;animation=nullptr;duration=0;ready=false;}
+    void destroy(){if(texture)glDeleteTextures(1,&texture);texture=0;if(mesh.vbo||mesh.ibo)mesh.destroy();if(data)cgltf_free(data);data=nullptr;fileBytes.clear();bindVertices.clear();animatedVertices.clear();indices.clear();inverseBind.clear();nodeWorld.clear();translations.clear();scales.clear();rotations.clear();meshNode=nullptr;skin=nullptr;animation=nullptr;duration=0;ready=false;}
 };
 static void addFace(std::vector<Vertex>& v, std::vector<uint16_t>& ix,
                     const std::array<Vec3,4>& p, const Vec3& n) {
@@ -650,17 +676,18 @@ void main(){ vec2 p=vec2(aPosition.x/uViewport.x*2.0-1.0,1.0-aPosition.y/uViewpo
         uiPos=glGetAttribLocation(uiProgram,"aPosition"); uiColor=glGetAttribLocation(uiProgram,"aColor"); uiViewport=glGetUniformLocation(uiProgram,"uViewport");
         glGenBuffers(1,&rainVbo); glGenBuffers(1,&uiVbo);
     }
-    void setObjectUniforms(const Mat4& model,int texture,Vec3 tint,float wet,float alpha) {
+    void setObjectUniforms(const Mat4& model,int texture,Vec3 tint,float wet,float alpha,GLuint customTexture=0) {
         Mat4 mvp=vp*model;
         glUniformMatrix4fv(uMVP,1,GL_FALSE,mvp.m.data());
         glUniformMatrix4fv(uModel,1,GL_FALSE,model.m.data());
         glUniform3f(uTint,tint.x,tint.y,tint.z); glUniform1f(uWet,wet); glUniform1f(uAlpha,alpha);
-        glUniform1i(uUseTex,texture>=0?1:0); glUniform1i(uTex,0);
-        if(texture>=0 && texture<TEX_COUNT) { glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,textures[static_cast<size_t>(texture)]); }
+        glUniform1i(uUseTex,(customTexture!=0 || (texture>=0 && texture<TEX_COUNT))?1:0); glUniform1i(uTex,0);
+        if(customTexture) { glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,customTexture); }
+        else if(texture>=0 && texture<TEX_COUNT) { glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,textures[static_cast<size_t>(texture)]); }
     }
-    void draw(const Mesh& mesh,const Mat4& model,int texture,Vec3 tint,float wet=0,float alpha=1) {
+    void draw(const Mesh& mesh,const Mat4& model,int texture,Vec3 tint,float wet=0,float alpha=1,GLuint customTexture=0) {
         if(!program || !mesh.vbo || !mesh.ibo) return;
-        setObjectUniforms(model,texture,tint,wet,alpha);
+        setObjectUniforms(model,texture,tint,wet,alpha,customTexture);
         glBindBuffer(GL_ARRAY_BUFFER,mesh.vbo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mesh.ibo);
         glEnableVertexAttribArray(static_cast<GLuint>(aPos)); glEnableVertexAttribArray(static_cast<GLuint>(aNormal)); glEnableVertexAttribArray(static_cast<GLuint>(aUV));
         glVertexAttribPointer(static_cast<GLuint>(aPos),3,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,px)));
@@ -686,7 +713,7 @@ void main(){ vec2 p=vec2(aPosition.x/uViewport.x*2.0-1.0,1.0-aPosition.y/uViewpo
             riggedPlayer.update(g.elapsed);
             const float s=riggedPlayer.modelScale;
             Mat4 model=root*Mat4::translation({-riggedPlayer.centerX*s,-riggedPlayer.minY*s,-riggedPlayer.centerZ*s})*Mat4::scale({s,s,s});
-            draw(riggedPlayer.mesh,model,6,{0.62f,0.78f,0.82f},0.28f,1.0f);
+            draw(riggedPlayer.mesh,model,6,{0.94f,0.94f,0.94f},0.48f,1.0f,riggedPlayer.texture);
             return;
         }
         const float phase=g.gaitPhase;
