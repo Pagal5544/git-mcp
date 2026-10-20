@@ -33,7 +33,7 @@ constexpr int TEX_COUNT = 7;
 // Keep startup conservative on lower-memory Android devices; re-enable after device testing.
 constexpr bool ENABLE_RAIN_AUDIO = false;
 // Temporary diagnostic build: test NativeActivity + EGL without renderer/assets/audio.
-constexpr bool MM_BOOT_DIAGNOSTIC_ONLY = true;
+constexpr bool MM_BOOT_DIAGNOSTIC_ONLY = false;
 
 struct Vec3 {
     float x = 0, y = 0, z = 0;
