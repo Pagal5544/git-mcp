@@ -789,26 +789,42 @@ struct Engine {
     std::chrono::steady_clock::time_point previous=std::chrono::steady_clock::now();
 
     bool initDisplay(ANativeWindow* window) {
+        MM_LOGI("Startup: initDisplay begin");
         display=eglGetDisplay(EGL_DEFAULT_DISPLAY);
-        if(display==EGL_NO_DISPLAY) return false;
+        if(display==EGL_NO_DISPLAY) { MM_LOGE("EGL startup: eglGetDisplay failed (0x%x)",eglGetError()); return false; }
         EGLint major=0,minor=0;
-        if(!eglInitialize(display,&major,&minor)) return false;
+        if(!eglInitialize(display,&major,&minor)) { MM_LOGE("EGL startup: eglInitialize failed (0x%x)",eglGetError()); return false; }
+        MM_LOGI("EGL initialized %d.%d",major,minor);
         const EGLint attribs[]={EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_SURFACE_TYPE,EGL_WINDOW_BIT,
             EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,16,EGL_NONE};
+        const EGLint fallbackAttribs[]={EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_SURFACE_TYPE,EGL_WINDOW_BIT,
+            EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_DEPTH_SIZE,16,EGL_NONE};
         EGLConfig config{}; EGLint count=0;
-        if(!eglChooseConfig(display,attribs,&config,1,&count)||count==0) return false;
-        EGLint format=0; eglGetConfigAttrib(display,config,EGL_NATIVE_VISUAL_ID,&format);
-        ANativeWindow_setBuffersGeometry(window,0,0,format);
+        EGLBoolean chose=eglChooseConfig(display,attribs,&config,1,&count);
+        if(!chose || count==0) {
+            MM_LOGE("EGL config with alpha failed (0x%x); trying fallback",eglGetError());
+            count=0;
+            chose=eglChooseConfig(display,fallbackAttribs,&config,1,&count);
+        }
+        if(!chose || count==0) { MM_LOGE("EGL startup: no compatible ES2 window config (0x%x)",eglGetError()); return false; }
+        EGLint format=0;
+        if(!eglGetConfigAttrib(display,config,EGL_NATIVE_VISUAL_ID,&format)) {
+            MM_LOGE("EGL startup: eglGetConfigAttrib failed (0x%x)",eglGetError()); return false;
+        }
+        if(ANativeWindow_setBuffersGeometry(window,0,0,format)!=0) MM_LOGE("Could not set native window buffer geometry");
         const EGLint ctxAttrs[]={EGL_CONTEXT_CLIENT_VERSION,2,EGL_NONE};
         context=eglCreateContext(display,config,EGL_NO_CONTEXT,ctxAttrs);
+        if(context==EGL_NO_CONTEXT) { MM_LOGE("EGL startup: eglCreateContext failed (0x%x)",eglGetError()); return false; }
         surface=eglCreateWindowSurface(display,config,window,nullptr);
-        if(context==EGL_NO_CONTEXT||surface==EGL_NO_SURFACE) return false;
-        if(!eglMakeCurrent(display,surface,surface,context)) return false;
+        if(surface==EGL_NO_SURFACE) { MM_LOGE("EGL startup: eglCreateWindowSurface failed (0x%x)",eglGetError()); return false; }
+        if(!eglMakeCurrent(display,surface,surface,context)) { MM_LOGE("EGL startup: eglMakeCurrent failed (0x%x)",eglGetError()); return false; }
+        MM_LOGI("EGL context and window surface ready");
         EGLint w=0,h=0; eglQuerySurface(display,surface,EGL_WIDTH,&w); eglQuerySurface(display,surface,EGL_HEIGHT,&h);
         width=static_cast<float>(std::max(1,w)); height=static_cast<float>(std::max(1,h));
+        MM_LOGI("Startup: initializing renderer and textures");
         renderer.initialize(app->activity->assetManager); renderer.resize(w,h);
         initialized=true; previous=std::chrono::steady_clock::now();
-        if(!audioStarted) { audio.start(); audioStarted=true; }
+        if(!audioStarted) { MM_LOGI("Startup: initializing rain audio"); audio.start(); audioStarted=true; }
         MM_LOGI("Display ready %dx%d",w,h);
         return true;
     }
@@ -902,9 +918,11 @@ static int32_t handleInput(android_app* app,AInputEvent* event) {
 } // namespace mm
 
 void android_main(android_app* app) {
+    MM_LOGI("Native entry: android_main reached");
     mm::Engine engine;
     engine.app=app; app->userData=&engine; app->onAppCmd=mm::handleAppCmd; app->onInputEvent=mm::handleInput;
     engine.game.reset();
+    MM_LOGI("Startup: game state initialized; waiting for window");
     while(!app->destroyRequested) {
         int events=0; android_poll_source* source=nullptr;
         int ident;
