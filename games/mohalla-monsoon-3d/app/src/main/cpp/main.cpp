@@ -32,8 +32,12 @@
 namespace mm {
 constexpr float PI = 3.14159265358979323846f;
 constexpr int TEX_SIZE = 2048;
-constexpr int RENDER_TEX_SIZE = 1024;
+constexpr int RENDER_TEX_SIZE = 512;
 constexpr int TEX_COUNT = 7;
+// Keep startup conservative on lower-memory Android devices; re-enable after device testing.
+constexpr bool ENABLE_RAIN_AUDIO = false;
+// Temporary diagnostic build: test NativeActivity + EGL without renderer/assets/audio.
+constexpr bool MM_BOOT_DIAGNOSTIC_ONLY = false;
 
 struct Vec3 {
     float x = 0, y = 0, z = 0;
@@ -128,279 +132,102 @@ struct Mesh {
         if (ibo) glDeleteBuffers(1,&ibo);
         vbo=ibo=0; indexCount=0;
     }
-
 };
 
 struct RiggedCharacter {
-    struct SkinVertex {
-        Vertex base{};
-        std::array<uint16_t,4> joints{{0,0,0,0}};
-        std::array<float,4> weights{{1,0,0,0}};
-    };
-    cgltf_data* data=nullptr;
-    std::vector<uint8_t> fileBytes;
-    std::vector<SkinVertex> bindVertices;
-    std::vector<Vertex> animatedVertices;
-    std::vector<uint16_t> indices;
-    std::vector<Mat4> inverseBind;
-    std::vector<Mat4> nodeWorld;
-    std::vector<Vec3> translations, scales;
-    std::vector<std::array<float,4>> rotations;
-    Mesh mesh;
-    cgltf_node* meshNode=nullptr;
-    cgltf_skin* skin=nullptr;
-    cgltf_animation* animation=nullptr;
-    float duration=0.0f, modelScale=1.0f, minY=0.0f, centerX=0.0f, centerZ=0.0f;
-    bool ready=false;
-
-    static Mat4 fromFloatMatrix(const float* v) {
-        Mat4 m; std::copy(v,v+16,m.m.begin()); return m;
+    struct SkinVertex { Vertex base{}; std::array<uint16_t,4> joints{{0,0,0,0}}; std::array<float,4> weights{{1,0,0,0}}; };
+    cgltf_data* data=nullptr; std::vector<uint8_t> fileBytes; std::vector<SkinVertex> bindVertices;
+    std::vector<Vertex> animatedVertices; std::vector<uint16_t> indices; std::vector<Mat4> inverseBind,nodeWorld;
+    std::vector<Vec3> translations,scales; std::vector<std::array<float,4>> rotations; Mesh mesh;
+    cgltf_node* meshNode=nullptr; cgltf_skin* skin=nullptr; cgltf_animation* animation=nullptr;
+    float duration=0,modelScale=1,minY=0,centerX=0,centerZ=0; bool ready=false;
+    static Mat4 fromM(const float* a){ Mat4 r; std::copy(a,a+16,r.m.begin()); return r; }
+    static Mat4 quatM(const std::array<float,4>& q){
+        const float x=q[0],y=q[1],z=q[2],w=q[3]; Mat4 m=Mat4::identity();
+        m.m[0]=1-2*(y*y+z*z);m.m[1]=2*(x*y+z*w);m.m[2]=2*(x*z-y*w);
+        m.m[4]=2*(x*y-z*w);m.m[5]=1-2*(x*x+z*z);m.m[6]=2*(y*z+x*w);
+        m.m[8]=2*(x*z+y*w);m.m[9]=2*(y*z-x*w);m.m[10]=1-2*(x*x+y*y);return m;
     }
-    static Mat4 quatMatrix(const std::array<float,4>& q) {
-        const float x=q[0],y=q[1],z=q[2],w=q[3];
-        Mat4 m=Mat4::identity();
-        m.m[0]=1-2*(y*y+z*z); m.m[1]=2*(x*y+z*w); m.m[2]=2*(x*z-y*w);
-        m.m[4]=2*(x*y-z*w); m.m[5]=1-2*(x*x+z*z); m.m[6]=2*(y*z+x*w);
-        m.m[8]=2*(x*z+y*w); m.m[9]=2*(y*z-x*w); m.m[10]=1-2*(x*x+y*y);
-        return m;
+    static Mat4 localM(const cgltf_node* n,const Vec3& t,const std::array<float,4>& q,const Vec3& s){
+        return n->has_matrix?fromM(n->matrix):Mat4::translation(t)*quatM(q)*Mat4::scale(s);
     }
-    static Mat4 nodeLocal(const cgltf_node* node,const Vec3& t,const std::array<float,4>& q,const Vec3& s) {
-        if(node->has_matrix) return fromFloatMatrix(node->matrix);
-        return Mat4::translation(t)*quatMatrix(q)*Mat4::scale(s);
-    }
-    static Vec3 transformPoint(const Mat4& m,const Vec3& p) {
-        return {m.m[0]*p.x+m.m[4]*p.y+m.m[8]*p.z+m.m[12],
-                m.m[1]*p.x+m.m[5]*p.y+m.m[9]*p.z+m.m[13],
-                m.m[2]*p.x+m.m[6]*p.y+m.m[10]*p.z+m.m[14]};
-    }
-    static Vec3 transformNormal(const Mat4& m,const Vec3& n) {
-        return normalize({m.m[0]*n.x+m.m[4]*n.y+m.m[8]*n.z,
-                          m.m[1]*n.x+m.m[5]*n.y+m.m[9]*n.z,
-                          m.m[2]*n.x+m.m[6]*n.y+m.m[10]*n.z});
-    }
-    size_t nodeIndex(const cgltf_node* n) const {
-        return (n && data && n>=data->nodes && n<data->nodes+data->nodes_count)
-            ? static_cast<size_t>(n-data->nodes) : data->nodes_count;
-    }
-    bool readVec3(const cgltf_accessor* a,cgltf_size i,Vec3& out) const {
-        float v[3]={0,0,0};
-        if(!a || !cgltf_accessor_read_float(a,i,v,3)) return false;
-        out={v[0],v[1],v[2]}; return true;
-    }
-    bool load(AAssetManager* mgr,const char* path) {
-        destroy();
-        AAsset* a=AAssetManager_open(mgr,path,AASSET_MODE_BUFFER);
-        if(!a) { MM_LOGE("Rigged GLB missing: %s; procedural character remains active",path); return false; }
-        const off_t n=AAsset_getLength(a);
-        if(n<=0 || n>64*1024*1024) { AAsset_close(a); return false; }
-        fileBytes.resize(static_cast<size_t>(n));
-        size_t offset=0;
-        while(offset<fileBytes.size()) {
-            const int got=AAsset_read(a,fileBytes.data()+offset,fileBytes.size()-offset);
-            if(got<=0) break;
-            offset+=static_cast<size_t>(got);
-        }
-        AAsset_close(a);
-        if(offset!=fileBytes.size()) { fileBytes.clear(); return false; }
-        cgltf_options options{};
-        if(cgltf_parse(&options,fileBytes.data(),fileBytes.size(),&data)!=cgltf_result_success || !data) {
-            MM_LOGE("Could not parse rigged GLB: %s",path); destroy(); return false;
-        }
-        if(cgltf_load_buffers(&options,data,nullptr)!=cgltf_result_success) {
-            MM_LOGE("Could not load GLB buffers: %s",path); destroy(); return false;
-        }
-        for(cgltf_size i=0;i<data->nodes_count;i++) {
-            if(data->nodes[i].mesh && data->nodes[i].skin) {
-                meshNode=&data->nodes[i]; skin=data->nodes[i].skin; break;
-            }
-        }
-        if(!meshNode || !skin || skin->joints_count==0 || !meshNode->mesh ||
-           meshNode->mesh->primitives_count==0) {
-            MM_LOGE("Rigged GLB has no skinned triangle primitive: %s",path); destroy(); return false;
-        }
+    static Vec3 point(const Mat4& m,const Vec3& p){return {m.m[0]*p.x+m.m[4]*p.y+m.m[8]*p.z+m.m[12],m.m[1]*p.x+m.m[5]*p.y+m.m[9]*p.z+m.m[13],m.m[2]*p.x+m.m[6]*p.y+m.m[10]*p.z+m.m[14]};}
+    static Vec3 normal(const Mat4& m,const Vec3& n){return normalize({m.m[0]*n.x+m.m[4]*n.y+m.m[8]*n.z,m.m[1]*n.x+m.m[5]*n.y+m.m[9]*n.z,m.m[2]*n.x+m.m[6]*n.y+m.m[10]*n.z});}
+    size_t ni(const cgltf_node* n)const{return n&&data&&n>=data->nodes&&n<data->nodes+data->nodes_count?static_cast<size_t>(n-data->nodes):(data?data->nodes_count:0);}
+    bool load(AAssetManager* mgr,const char* path){
+        destroy(); AAsset* a=AAssetManager_open(mgr,path,AASSET_MODE_BUFFER);
+        if(!a){MM_LOGE("Rigged GLB missing: %s; procedural fallback active",path);return false;}
+        off_t n=AAsset_getLength(a);if(n<=0||n>64*1024*1024){AAsset_close(a);return false;}
+        fileBytes.resize(static_cast<size_t>(n));size_t off=0;
+        while(off<fileBytes.size()){int got=AAsset_read(a,fileBytes.data()+off,fileBytes.size()-off);if(got<=0)break;off+=static_cast<size_t>(got);}AAsset_close(a);
+        if(off!=fileBytes.size()){fileBytes.clear();return false;}
+        cgltf_options opt{};if(cgltf_parse(&opt,fileBytes.data(),fileBytes.size(),&data)!=cgltf_result_success||!data){destroy();return false;}
+        if(cgltf_load_buffers(&opt,data,nullptr)!=cgltf_result_success){destroy();return false;}
+        for(cgltf_size i=0;i<data->nodes_count;i++)if(data->nodes[i].mesh&&data->nodes[i].skin){meshNode=&data->nodes[i];skin=meshNode->skin;break;}
+        if(!meshNode||!skin||!skin->joints_count||!meshNode->mesh||!meshNode->mesh->primitives_count){destroy();return false;}
         const cgltf_primitive* p=&meshNode->mesh->primitives[0];
-        if(p->type!=cgltf_primitive_type_triangles) { destroy(); return false; }
+        if(p->type!=cgltf_primitive_type_triangles){destroy();return false;}
         const cgltf_accessor* pos=cgltf_find_accessor(p,cgltf_attribute_type_position,0);
         const cgltf_accessor* nor=cgltf_find_accessor(p,cgltf_attribute_type_normal,0);
         const cgltf_accessor* uv=cgltf_find_accessor(p,cgltf_attribute_type_texcoord,0);
-        const cgltf_accessor* joints=cgltf_find_accessor(p,cgltf_attribute_type_joints,0);
-        const cgltf_accessor* weights=cgltf_find_accessor(p,cgltf_attribute_type_weights,0);
-        if(!pos || !joints || !weights || pos->count==0 || pos->count>65535) {
-            MM_LOGE("Rigged GLB missing POSITION/JOINTS_0/WEIGHTS_0 or too many vertices");
-            destroy(); return false;
+        const cgltf_accessor* ja=cgltf_find_accessor(p,cgltf_attribute_type_joints,0);
+        const cgltf_accessor* wa=cgltf_find_accessor(p,cgltf_attribute_type_weights,0);
+        if(!pos||!ja||!wa||!pos->count||pos->count>65535){destroy();return false;}
+        bindVertices.resize(pos->count);animatedVertices.resize(pos->count);
+        float lo[3]={1e9f,1e9f,1e9f},hi[3]={-1e9f,-1e9f,-1e9f};
+        for(cgltf_size i=0;i<pos->count;i++){
+            float v[3]={0,0,0},nn[3]={0,1,0},tx[2]={0,0},ww[4]={1,0,0,0};cgltf_uint jj[4]={0,0,0,0};
+            if(!cgltf_accessor_read_float(pos,i,v,3)||!cgltf_accessor_read_uint(ja,i,jj,4)||!cgltf_accessor_read_float(wa,i,ww,4)){destroy();return false;}
+            if(nor)cgltf_accessor_read_float(nor,i,nn,3);if(uv)cgltf_accessor_read_float(uv,i,tx,2);
+            SkinVertex sv;sv.base={v[0],v[1],v[2],nn[0],nn[1],nn[2],tx[0],tx[1]};float sum=0;
+            for(int k=0;k<4;k++){sv.joints[k]=static_cast<uint16_t>(std::min<cgltf_uint>(jj[k],static_cast<cgltf_uint>(skin->joints_count-1)));sv.weights[k]=std::max(0.0f,ww[k]);sum+=sv.weights[k];}
+            if(sum<1e-6f)sv.weights={{1,0,0,0}};else for(float& w:sv.weights)w/=sum;
+            bindVertices[i]=sv;animatedVertices[i]=sv.base;
+            for(int k=0;k<3;k++){lo[k]=std::min(lo[k],v[k]);hi[k]=std::max(hi[k],v[k]);}
         }
-        bindVertices.resize(pos->count);
-        animatedVertices.resize(pos->count);
-        float lo[3]={1e9f,1e9f,1e9f}, hi[3]={-1e9f,-1e9f,-1e9f};
-        for(cgltf_size i=0;i<pos->count;i++) {
-            float v[3]={0,0,0}, nrm[3]={0,1,0}, tex[2]={0,0};
-            cgltf_uint ji[4]={0,0,0,0}; float wt[4]={1,0,0,0};
-            if(!cgltf_accessor_read_float(pos,i,v,3) ||
-               !cgltf_accessor_read_uint(joints,i,ji,4) ||
-               !cgltf_accessor_read_float(weights,i,wt,4)) { destroy(); return false; }
-            if(nor) cgltf_accessor_read_float(nor,i,nrm,3);
-            if(uv) cgltf_accessor_read_float(uv,i,tex,2);
-            SkinVertex sv;
-            sv.base={v[0],v[1],v[2],nrm[0],nrm[1],nrm[2],tex[0],tex[1]};
-            float ws=0;
-            for(int k=0;k<4;k++) {
-                sv.joints[static_cast<size_t>(k)]=static_cast<uint16_t>(std::min<cgltf_uint>(ji[k],static_cast<cgltf_uint>(skin->joints_count-1)));
-                sv.weights[static_cast<size_t>(k)]=std::max(0.0f,wt[k]); ws+=sv.weights[static_cast<size_t>(k)];
-            }
-            if(ws<1e-6f) { sv.weights={{1,0,0,0}}; }
-            else for(float& w:sv.weights) w/=ws;
-            bindVertices[i]=sv; animatedVertices[i]=sv.base;
-            for(int k=0;k<3;k++) { lo[k]=std::min(lo[k],v[k]); hi[k]=std::max(hi[k],v[k]); }
-        }
-        if(p->indices) {
-            indices.resize(p->indices->count);
-            for(cgltf_size i=0;i<p->indices->count;i++) {
-                const cgltf_size ix=cgltf_accessor_read_index(p->indices,i);
-                if(ix>=pos->count || ix>65535) { destroy(); return false; }
-                indices[i]=static_cast<uint16_t>(ix);
-            }
-        } else {
-            indices.resize(pos->count);
-            for(size_t i=0;i<indices.size();i++) indices[i]=static_cast<uint16_t>(i);
-        }
-        if(indices.empty() || indices.size()%3!=0) { destroy(); return false; }
-        minY=lo[1]; centerX=(lo[0]+hi[0])*0.5f; centerZ=(lo[2]+hi[2])*0.5f;
-        modelScale=1.8f/std::max(0.05f,hi[1]-lo[1]);
+        if(p->indices){indices.resize(p->indices->count);for(cgltf_size i=0;i<p->indices->count;i++){cgltf_size x=cgltf_accessor_read_index(p->indices,i);if(x>=pos->count||x>65535){destroy();return false;}indices[i]=static_cast<uint16_t>(x);}}
+        else{indices.resize(pos->count);for(size_t i=0;i<indices.size();i++)indices[i]=static_cast<uint16_t>(i);}
+        if(indices.empty()||indices.size()%3){destroy();return false;}
+        minY=lo[1];centerX=(lo[0]+hi[0])*.5f;centerZ=(lo[2]+hi[2])*.5f;modelScale=1.8f/std::max(.05f,hi[1]-lo[1]);
         inverseBind.resize(skin->joints_count,Mat4::identity());
-        for(cgltf_size j=0;j<skin->joints_count;j++) {
-            if(skin->inverse_bind_matrices) {
-                float m[16];
-                if(cgltf_accessor_read_float(skin->inverse_bind_matrices,j,m,16))
-                    inverseBind[j]=fromFloatMatrix(m);
-            }
-        }
-        translations.resize(data->nodes_count); scales.resize(data->nodes_count,{1,1,1});
-        rotations.resize(data->nodes_count,{{0,0,0,1}});
-        nodeWorld.resize(data->nodes_count,Mat4::identity());
-        for(cgltf_size i=0;i<data->nodes_count;i++) {
-            const cgltf_node* node=&data->nodes[i];
-            if(node->has_translation) translations[i]={node->translation[0],node->translation[1],node->translation[2]};
-            if(node->has_scale) scales[i]={node->scale[0],node->scale[1],node->scale[2]};
-            if(node->has_rotation) rotations[i]={{node->rotation[0],node->rotation[1],node->rotation[2],node->rotation[3]}};
-        }
-        if(data->animations_count>0) {
-            animation=&data->animations[0];
-            for(cgltf_size c=0;c<animation->channels_count;c++) {
-                const cgltf_accessor* input=animation->channels[c].sampler?animation->channels[c].sampler->input:nullptr;
-                if(!input) continue;
-                for(cgltf_size k=0;k<input->count;k++) {
-                    float t=0; cgltf_accessor_read_float(input,k,&t,1); duration=std::max(duration,t);
-                }
-            }
-        }
-        mesh.upload(animatedVertices,indices);
-        if(!mesh.vbo || !mesh.ibo) { destroy(); return false; }
-        ready=true;
-        update(0);
-        MM_LOGI("Rigged GLB ready: %zu vertices, %zu joints, animation=%s",
-                bindVertices.size(),skin->joints_count,animation?"yes":"no");
-        return true;
+        for(cgltf_size j=0;j<skin->joints_count;j++)if(skin->inverse_bind_matrices){float m[16];if(cgltf_accessor_read_float(skin->inverse_bind_matrices,j,m,16))inverseBind[j]=fromM(m);}
+        translations.resize(data->nodes_count);scales.resize(data->nodes_count,{1,1,1});rotations.resize(data->nodes_count,{{0,0,0,1}});nodeWorld.resize(data->nodes_count,Mat4::identity());
+        if(data->animations_count){animation=&data->animations[0];for(cgltf_size c=0;c<animation->channels_count;c++){const auto* in=animation->channels[c].sampler?animation->channels[c].sampler->input:nullptr;if(in)for(cgltf_size k=0;k<in->count;k++){float t=0;cgltf_accessor_read_float(in,k,&t,1);duration=std::max(duration,t);}}}
+        mesh.upload(animatedVertices,indices);if(!mesh.vbo||!mesh.ibo){destroy();return false;}
+        ready=true;update(0);MM_LOGI("Rigged GLB ready: %zu vertices / %zu bones",bindVertices.size(),skin->joints_count);return true;
     }
-    void sampleChannel(const cgltf_animation_channel& ch,float time) {
-        if(!ch.sampler || !ch.sampler->input || !ch.sampler->output || !ch.target_node) return;
-        const cgltf_accessor* input=ch.sampler->input; const cgltf_accessor* output=ch.sampler->output;
-        if(input->count==0 || output->count==0) return;
-        cgltf_size a=0,b=0; float ta=0,tb=0;
-        cgltf_accessor_read_float(input,0,&ta,1); tb=ta;
-        if(time<=ta) b=0;
-        else {
-            for(cgltf_size k=1;k<input->count;k++) {
-                cgltf_accessor_read_float(input,k,&tb,1);
-                if(time<=tb) { a=k-1; b=k; cgltf_accessor_read_float(input,a,&ta,1); break; }
-                a=k; ta=tb;
-            }
-            if(time>=ta && a==input->count-1) { b=a; cgltf_accessor_read_float(input,a,&ta,1); tb=ta; }
-        }
-        float alpha=(b==a || tb<=ta)?0.0f:clampf((time-ta)/(tb-ta),0.0f,1.0f);
-        if(ch.sampler->interpolation==cgltf_interpolation_type_step) alpha=0.0f;
-        const size_t ni=nodeIndex(ch.target_node); if(ni>=data->nodes_count) return;
-        const size_t comps=ch.target_path==cgltf_animation_path_type_rotation?4:3;
-        float va[4]={0,0,0,1}, vb[4]={0,0,0,1};
-        const cgltf_size ia=(ch.sampler->interpolation==cgltf_interpolation_type_cubic_spline)?a*3+1:a;
-        const cgltf_size ib=(ch.sampler->interpolation==cgltf_interpolation_type_cubic_spline)?b*3+1:b;
-        if(ia>=output->count || ib>=output->count ||
-           !cgltf_accessor_read_float(output,ia,va,comps) ||
-           !cgltf_accessor_read_float(output,ib,vb,comps)) return;
-        if(ch.target_path==cgltf_animation_path_type_translation) {
-            translations[ni]={mixf(va[0],vb[0],alpha),mixf(va[1],vb[1],alpha),mixf(va[2],vb[2],alpha)};
-        } else if(ch.target_path==cgltf_animation_path_type_scale) {
-            scales[ni]={mixf(va[0],vb[0],alpha),mixf(va[1],vb[1],alpha),mixf(va[2],vb[2],alpha)};
-        } else if(ch.target_path==cgltf_animation_path_type_rotation) {
-            std::array<float,4> q{};
-            float d=va[0]*vb[0]+va[1]*vb[1]+va[2]*vb[2]+va[3]*vb[3];
-            if(d<0) { for(int k=0;k<4;k++) vb[k]=-vb[k]; d=-d; }
-            if(d>0.9995f) {
-                for(int k=0;k<4;k++) q[k]=mixf(va[k],vb[k],alpha);
-            } else {
-                const float th=std::acos(clampf(d,-1,1)), sn=std::sin(th);
-                const float wa=std::sin((1-alpha)*th)/sn, wb=std::sin(alpha*th)/sn;
-                for(int k=0;k<4;k++) q[k]=va[k]*wa+vb[k]*wb;
-            }
-            float qn=std::sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
-            if(qn>1e-6f) for(float& v:q) v/=qn;
-            rotations[ni]=q;
+    void sample(const cgltf_animation_channel& c,float t){
+        if(!c.sampler||!c.sampler->input||!c.sampler->output||!c.target_node)return;
+        const auto* in=c.sampler->input;const auto* out=c.sampler->output;if(!in->count||!out->count)return;
+        cgltf_size a=0,b=0;float ta=0,tb=0;cgltf_accessor_read_float(in,0,&ta,1);tb=ta;
+        if(t>ta){for(cgltf_size k=1;k<in->count;k++){cgltf_accessor_read_float(in,k,&tb,1);if(t<=tb){a=k-1;b=k;cgltf_accessor_read_float(in,a,&ta,1);break;}a=k;ta=tb;}if(t>=ta&&a==in->count-1){b=a;cgltf_accessor_read_float(in,a,&ta,1);tb=ta;}}
+        float f=(b==a||tb<=ta)?0:clampf((t-ta)/(tb-ta),0,1);if(c.sampler->interpolation==cgltf_interpolation_type_step)f=0;
+        size_t n=ni(c.target_node);if(n>=data->nodes_count)return;size_t comps=c.target_path==cgltf_animation_path_type_rotation?4:3;
+        cgltf_size ia=c.sampler->interpolation==cgltf_interpolation_type_cubic_spline?a*3+1:a,ib=c.sampler->interpolation==cgltf_interpolation_type_cubic_spline?b*3+1:b;
+        float va[4]={0,0,0,1},vb[4]={0,0,0,1};if(ia>=out->count||ib>=out->count||!cgltf_accessor_read_float(out,ia,va,comps)||!cgltf_accessor_read_float(out,ib,vb,comps))return;
+        if(c.target_path==cgltf_animation_path_type_translation)translations[n]={mixf(va[0],vb[0],f),mixf(va[1],vb[1],f),mixf(va[2],vb[2],f)};
+        else if(c.target_path==cgltf_animation_path_type_scale)scales[n]={mixf(va[0],vb[0],f),mixf(va[1],vb[1],f),mixf(va[2],vb[2],f)};
+        else if(c.target_path==cgltf_animation_path_type_rotation){
+            std::array<float,4> q{};float d=va[0]*vb[0]+va[1]*vb[1]+va[2]*vb[2]+va[3]*vb[3];if(d<0){for(int k=0;k<4;k++)vb[k]=-vb[k];d=-d;}
+            if(d>.9995f)for(int k=0;k<4;k++)q[k]=mixf(va[k],vb[k],f);
+            else{float th=std::acos(clampf(d,-1,1)),sn=std::sin(th),wa=std::sin((1-f)*th)/sn,wb=std::sin(f*th)/sn;for(int k=0;k<4;k++)q[k]=va[k]*wa+vb[k]*wb;}
+            float z=std::sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);if(z>1e-6f)for(float& x:q)x/=z;rotations[n]=q;
         }
     }
-    void update(float seconds) {
-        if(!ready || !data || !skin) return;
-        for(cgltf_size i=0;i<data->nodes_count;i++) {
-            const cgltf_node* n=&data->nodes[i];
-            translations[i]=n->has_translation?Vec3(n->translation[0],n->translation[1],n->translation[2]):Vec3(0,0,0);
-            scales[i]=n->has_scale?Vec3(n->scale[0],n->scale[1],n->scale[2]):Vec3(1,1,1);
-            rotations[i]=n->has_rotation?std::array<float,4>{{n->rotation[0],n->rotation[1],n->rotation[2],n->rotation[3]}}:std::array<float,4>{{0,0,0,1}};
-        }
-        if(animation && duration>1e-5f) {
-            float t=std::fmod(std::max(0.0f,seconds),duration);
-            for(cgltf_size c=0;c<animation->channels_count;c++) sampleChannel(animation->channels[c],t);
-        }
+    void update(float seconds){
+        if(!ready||!data||!skin)return;
+        for(cgltf_size i=0;i<data->nodes_count;i++){const cgltf_node* n=&data->nodes[i];translations[i]=n->has_translation?Vec3(n->translation[0],n->translation[1],n->translation[2]):Vec3{};scales[i]=n->has_scale?Vec3(n->scale[0],n->scale[1],n->scale[2]):Vec3{1,1,1};rotations[i]=n->has_rotation?std::array<float,4>{{n->rotation[0],n->rotation[1],n->rotation[2],n->rotation[3]}}:std::array<float,4>{{0,0,0,1}};}
+        if(animation&&duration>1e-5f){float t=std::fmod(std::max(0.0f,seconds),duration);for(cgltf_size c=0;c<animation->channels_count;c++)sample(animation->channels[c],t);}
         std::vector<uint8_t> state(data->nodes_count,0);
-        std::function<void(size_t)> world=[&](size_t i) {
-            if(i>=data->nodes_count || state[i]==2) return;
-            if(state[i]==1) return;
-            state[i]=1; const cgltf_node* n=&data->nodes[i];
-            const Mat4 local=nodeLocal(n,translations[i],rotations[i],scales[i]);
-            const size_t pi=nodeIndex(n->parent);
-            if(pi<data->nodes_count) { world(pi); nodeWorld[i]=nodeWorld[pi]*local; }
-            else nodeWorld[i]=local;
-            state[i]=2;
-        };
-        for(size_t i=0;i<data->nodes_count;i++) world(i);
-        std::vector<Mat4> jointMats(skin->joints_count,Mat4::identity());
-        for(cgltf_size j=0;j<skin->joints_count;j++) {
-            size_t ni=nodeIndex(skin->joints[j]);
-            if(ni<data->nodes_count) jointMats[j]=nodeWorld[ni]*inverseBind[j];
-        }
-        for(size_t i=0;i<bindVertices.size();i++) {
-            const SkinVertex& sv=bindVertices[i];
-            Vec3 p{sv.base.px,sv.base.py,sv.base.pz}, n{sv.base.nx,sv.base.ny,sv.base.nz};
-            Vec3 pp{0,0,0}, nn{0,0,0}; float wsum=0;
-            for(int k=0;k<4;k++) {
-                float w=sv.weights[static_cast<size_t>(k)]; size_t j=sv.joints[static_cast<size_t>(k)];
-                if(w<=0 || j>=jointMats.size()) continue;
-                pp=pp+transformPoint(jointMats[j],p)*w;
-                nn=nn+transformNormal(jointMats[j],n)*w; wsum+=w;
-            }
-            if(wsum<1e-5f) { pp=p; nn=n; }
-            animatedVertices[i]=sv.base;
-            animatedVertices[i].px=pp.x; animatedVertices[i].py=pp.y; animatedVertices[i].pz=pp.z;
-            Vec3 normal=normalize(nn); animatedVertices[i].nx=normal.x; animatedVertices[i].ny=normal.y; animatedVertices[i].nz=normal.z;
-        }
-        glBindBuffer(GL_ARRAY_BUFFER,mesh.vbo);
-        glBufferSubData(GL_ARRAY_BUFFER,0,animatedVertices.size()*sizeof(Vertex),animatedVertices.data());
-        glBindBuffer(GL_ARRAY_BUFFER,0);
+        std::function<void(size_t)> world=[&](size_t i){if(i>=data->nodes_count||state[i])return;state[i]=1;const cgltf_node* n=&data->nodes[i];Mat4 local=localM(n,translations[i],rotations[i],scales[i]);size_t p=ni(n->parent);if(p<data->nodes_count){world(p);nodeWorld[i]=nodeWorld[p]*local;}else nodeWorld[i]=local;state[i]=2;};
+        for(size_t i=0;i<data->nodes_count;i++)world(i);
+        std::vector<Mat4> jm(skin->joints_count,Mat4::identity());for(cgltf_size j=0;j<skin->joints_count;j++){size_t n=ni(skin->joints[j]);if(n<data->nodes_count)jm[j]=nodeWorld[n]*inverseBind[j];}
+        for(size_t i=0;i<bindVertices.size();i++){const auto& v=bindVertices[i];Vec3 p{v.base.px,v.base.py,v.base.pz},n{v.base.nx,v.base.ny,v.base.nz},pp{},nn{};float sum=0;
+            for(int k=0;k<4;k++){float w=v.weights[k];size_t j=v.joints[k];if(w<=0||j>=jm.size())continue;pp=pp+point(jm[j],p)*w;nn=nn+normal(jm[j],n)*w;sum+=w;}
+            if(sum<1e-5f){pp=p;nn=n;}animatedVertices[i]=v.base;animatedVertices[i].px=pp.x;animatedVertices[i].py=pp.y;animatedVertices[i].pz=pp.z;Vec3 N=normalize(nn);animatedVertices[i].nx=N.x;animatedVertices[i].ny=N.y;animatedVertices[i].nz=N.z;}
+        glBindBuffer(GL_ARRAY_BUFFER,mesh.vbo);glBufferSubData(GL_ARRAY_BUFFER,0,animatedVertices.size()*sizeof(Vertex),animatedVertices.data());glBindBuffer(GL_ARRAY_BUFFER,0);
     }
-    void destroy() {
-        if(mesh.vbo || mesh.ibo) mesh.destroy();
-        if(data) cgltf_free(data);
-        data=nullptr; fileBytes.clear(); bindVertices.clear(); animatedVertices.clear(); indices.clear();
-        inverseBind.clear(); nodeWorld.clear(); translations.clear(); scales.clear(); rotations.clear();
-        meshNode=nullptr; skin=nullptr; animation=nullptr; duration=0; ready=false;
-    }
+    void destroy(){if(mesh.vbo||mesh.ibo)mesh.destroy();if(data)cgltf_free(data);data=nullptr;fileBytes.clear();bindVertices.clear();animatedVertices.clear();indices.clear();inverseBind.clear();nodeWorld.clear();translations.clear();scales.clear();rotations.clear();meshNode=nullptr;skin=nullptr;animation=nullptr;duration=0;ready=false;}
 };
 static void addFace(std::vector<Vertex>& v, std::vector<uint16_t>& ix,
                     const std::array<Vec3,4>& p, const Vec3& n) {
@@ -852,44 +679,76 @@ void main(){ vec2 p=vec2(aPosition.x/uViewport.x*2.0-1.0,1.0-aPosition.y/uViewpo
         draw(sphere,model,texture,tint,0.05f,1);
     }
     void drawCharacter(const GameState& g) {
+        // Stylized, layered monsoon runner: rain jacket, hood, backpack and articulated limbs.
+        // Keep the mesh procedural so the Android build has no large runtime model dependency.
         Mat4 root=Mat4::translation({g.playerX,g.playerY,g.playerZ})*Mat4::rotateY(g.yaw);
         if(riggedPlayer.ready) {
-            // Center the imported GLB and normalize its height to the existing player scale.
             riggedPlayer.update(g.elapsed);
             const float s=riggedPlayer.modelScale;
             Mat4 model=root*Mat4::translation({-riggedPlayer.centerX*s,-riggedPlayer.minY*s,-riggedPlayer.centerZ*s})*Mat4::scale({s,s,s});
-            draw(riggedPlayer.mesh,model,-1,{0.62f,0.78f,0.82f},0.28f,1.0f);
+            draw(riggedPlayer.mesh,model,6,{0.62f,0.78f,0.82f},0.28f,1.0f);
             return;
         }
-        draw(sphere,root*Mat4::translation({0,0.02f,0})*Mat4::scale({0.80f,0.035f,0.62f}),-1,{0.10f,0.13f,0.15f},0.8f,0.52f);
-        float stride=g.moving?std::sin(g.gaitPhase)*0.24f:0;
-        float bend=g.moving?std::max(0.0f,std::sin(g.gaitPhase+PI))*0.12f:0;
-        float bob=g.moving?std::abs(std::sin(g.gaitPhase))*0.035f:0;
-        Vec3 hipL(-0.145f,0.77f+bob,0), hipR(0.145f,0.77f+bob,0);
-        Vec3 kneeL(-0.15f,0.43f+bob,stride), kneeR(0.15f,0.43f+bob,-stride);
-        Vec3 ankleL(-0.15f,0.12f+bob,stride*1.48f+bend), ankleR(0.15f,0.12f+bob,-stride*1.48f+bend);
-        Vec3 pants{0.20f,0.24f,0.25f}, skin{0.57f,0.34f,0.23f}, shirt{0.11f,0.30f,0.42f};
-        draw(sphere,root*Mat4::translation({0,0.78f+bob,0})*Mat4::scale({0.38f,0.25f,0.30f}),6,pants,0.04f);
-        drawBone(root,hipL,kneeL,0.105f,pants,6); drawBone(root,kneeL,ankleL,0.078f,pants,6);
-        drawBone(root,hipR,kneeR,0.105f,pants,6); drawBone(root,kneeR,ankleR,0.078f,pants,6);
-        draw(sphere,root*Mat4::translation({ankleL.x,ankleL.y-0.035f,ankleL.z+0.075f})*Mat4::scale({0.20f,0.10f,0.30f}),-1,{0.075f,0.075f,0.08f});
-        draw(sphere,root*Mat4::translation({ankleR.x,ankleR.y-0.035f,ankleR.z+0.075f})*Mat4::scale({0.20f,0.10f,0.30f}),-1,{0.075f,0.075f,0.08f});
-        draw(sphere,root*Mat4::translation({0,1.11f+bob,0})*Mat4::scale({0.45f,0.49f,0.29f}),6,shirt,0.02f);
-        draw(sphere,root*Mat4::translation({0,1.09f+bob,-0.205f})*Mat4::scale({0.31f,0.39f,0.15f}),6,{0.18f,0.20f,0.22f});
-        float armSwing=g.moving?std::sin(g.gaitPhase+PI)*0.28f:0;
-        Vec3 shL(-0.26f,1.30f+bob,0), shR(0.26f,1.30f+bob,0);
-        Vec3 elL(-0.34f,1.06f+bob,armSwing), elR(0.34f,1.06f+bob,-armSwing);
-        Vec3 handL(-0.34f,0.88f+bob,armSwing*1.5f), handR(0.34f,0.88f+bob,-armSwing*1.5f);
-        drawBone(root,shL,elL,0.082f,shirt,6); drawBone(root,elL,handL,0.066f,shirt,6);
-        drawBone(root,shR,elR,0.082f,shirt,6); drawBone(root,elR,handR,0.066f,shirt,6);
-        draw(sphere,root*Mat4::translation({handL.x,handL.y,handL.z})*Mat4::scale({0.115f,0.12f,0.12f}),-1,skin);
-        draw(sphere,root*Mat4::translation({handR.x,handR.y,handR.z})*Mat4::scale({0.115f,0.12f,0.12f}),-1,skin);
-        draw(sphere,root*Mat4::translation({0,1.57f+bob,0.015f})*Mat4::scale({0.235f,0.27f,0.225f}),-1,skin);
-        draw(sphere,root*Mat4::translation({0,1.755f+bob,-0.01f})*Mat4::scale({0.245f,0.105f,0.235f}),-1,{0.07f,0.055f,0.045f});
-        draw(sphere,root*Mat4::translation({-0.235f,1.56f+bob,0.02f})*Mat4::scale({0.055f,0.095f,0.07f}),-1,skin);
-        draw(sphere,root*Mat4::translation({0.235f,1.56f+bob,0.02f})*Mat4::scale({0.055f,0.095f,0.07f}),-1,skin);
-        draw(sphere,root*Mat4::translation({-0.078f,1.59f+bob,0.213f})*Mat4::scale({0.036f,0.034f,0.018f}),-1,{0.04f,0.035f,0.03f});
-        draw(sphere,root*Mat4::translation({0.078f,1.59f+bob,0.213f})*Mat4::scale({0.036f,0.034f,0.018f}),-1,{0.04f,0.035f,0.03f});
+        const float phase=g.gaitPhase;
+        const float stride=g.moving?std::sin(phase)*0.29f:0.0f;
+        const float recovery=g.moving?std::max(0.0f,std::sin(phase+PI))*0.16f:0.0f;
+        const float bob=g.moving?std::abs(std::sin(phase*2.0f))*0.045f:0.0f;
+        const float armSwing=g.moving?std::sin(phase+PI)*0.34f:0.0f;
+        const float lean=g.moving?(g.sprintHeld?0.10f:0.045f):0.0f;
+        const Vec3 pants{0.105f,0.13f,0.16f}, skin{0.48f,0.285f,0.19f};
+        const Vec3 jacket{0.035f,0.24f,0.25f}, jacketLight{0.055f,0.34f,0.32f};
+        const Vec3 trim{0.86f,0.66f,0.22f}, boot{0.055f,0.060f,0.064f};
+        draw(sphere,root*Mat4::translation({0,0.025f,0})*Mat4::scale({0.76f,0.035f,0.59f}),-1,{0.07f,0.09f,0.10f},0.8f,0.52f);
+
+        // Backpack and shoulder straps, visible from the rear camera.
+        draw(sphere,root*Mat4::translation({0,1.12f+bob,-0.285f})*Mat4::scale({0.32f,0.39f,0.18f}),5,{0.12f,0.15f,0.15f},0.12f);
+        draw(sphere,root*Mat4::translation({0,1.14f+bob,-0.382f})*Mat4::scale({0.22f,0.24f,0.025f}),-1,{0.20f,0.25f,0.23f});
+        draw(sphere,root*Mat4::translation({-0.18f,1.25f+bob,-0.19f})*Mat4::scale({0.055f,0.30f,0.045f}),-1,trim);
+        draw(sphere,root*Mat4::translation({0.18f,1.25f+bob,-0.19f})*Mat4::scale({0.055f,0.30f,0.045f}),-1,trim);
+
+        // Pelvis and articulated legs with knees, shin panels and boot soles.
+        draw(sphere,root*Mat4::translation({0,0.78f+bob,0})*Mat4::scale({0.34f,0.23f,0.28f}),6,pants,0.04f);
+        Vec3 hipL(-0.145f,0.76f+bob,0), hipR(0.145f,0.76f+bob,0);
+        Vec3 kneeL(-0.15f,0.43f+bob,stride*0.82f), kneeR(0.15f,0.43f+bob,-stride*0.82f);
+        Vec3 ankleL(-0.15f,0.12f+bob,stride*1.25f+recovery), ankleR(0.15f,0.12f+bob,-stride*1.25f+recovery);
+        drawBone(root,hipL,kneeL,0.092f,pants,6); drawBone(root,kneeL,ankleL,0.068f,pants,6);
+        drawBone(root,hipR,kneeR,0.092f,pants,6); drawBone(root,kneeR,ankleR,0.068f,pants,6);
+        draw(sphere,root*Mat4::translation({kneeL.x,kneeL.y,kneeL.z+0.025f})*Mat4::scale({0.13f,0.13f,0.13f}),-1,{0.13f,0.16f,0.17f});
+        draw(sphere,root*Mat4::translation({kneeR.x,kneeR.y,kneeR.z+0.025f})*Mat4::scale({0.13f,0.13f,0.13f}),-1,{0.13f,0.16f,0.17f});
+        draw(sphere,root*Mat4::translation({ankleL.x,ankleL.y-0.035f,ankleL.z+0.085f})*Mat4::scale({0.21f,0.085f,0.31f}),-1,boot);
+        draw(sphere,root*Mat4::translation({ankleR.x,ankleR.y-0.035f,ankleR.z+0.085f})*Mat4::scale({0.21f,0.085f,0.31f}),-1,boot);
+        draw(sphere,root*Mat4::translation({ankleL.x,ankleL.y-0.075f,ankleL.z+0.09f})*Mat4::scale({0.215f,0.025f,0.315f}),-1,{0.16f,0.17f,0.16f});
+        draw(sphere,root*Mat4::translation({ankleR.x,ankleR.y-0.075f,ankleR.z+0.09f})*Mat4::scale({0.215f,0.025f,0.315f}),-1,{0.16f,0.17f,0.16f});
+
+        // Jacket torso and segmented panels instead of one plain blue capsule.
+        draw(sphere,root*Mat4::translation({0,1.12f+bob,-lean*0.18f})*Mat4::scale({0.42f,0.48f,0.30f}),6,jacket,0.05f);
+        draw(sphere,root*Mat4::translation({0,1.12f+bob,0.246f})*Mat4::scale({0.255f,0.34f,0.028f}),-1,jacketLight,0.05f);
+        draw(sphere,root*Mat4::translation({0,0.89f+bob,0.235f})*Mat4::scale({0.29f,0.055f,0.035f}),-1,trim);
+        draw(sphere,root*Mat4::translation({0,1.43f+bob,0.015f})*Mat4::scale({0.28f,0.12f,0.25f}),-1,jacketLight);
+        // Collar and a small zipper highlight.
+        draw(sphere,root*Mat4::translation({0,1.48f+bob,0.10f})*Mat4::scale({0.17f,0.085f,0.15f}),-1,{0.025f,0.16f,0.17f});
+        draw(sphere,root*Mat4::translation({0,1.20f+bob,0.278f})*Mat4::scale({0.018f,0.25f,0.012f}),-1,trim);
+        for(int k=0;k<3;k++) draw(sphere,root*Mat4::translation({0.035f,1.29f-static_cast<float>(k)*0.075f+bob,0.29f})*Mat4::scale({0.018f,0.018f,0.012f}),-1,{0.72f,0.75f,0.66f});
+
+        // Arms swing opposite the legs; elbow/hand positions follow the gait.
+        Vec3 shL(-0.255f,1.34f+bob,0), shR(0.255f,1.34f+bob,0);
+        Vec3 elL(-0.34f,1.08f+bob,armSwing), elR(0.34f,1.08f+bob,-armSwing);
+        Vec3 handL(-0.34f,0.89f+bob,armSwing*1.42f), handR(0.34f,0.89f+bob,-armSwing*1.42f);
+        draw(sphere,root*Mat4::translation({shL.x,shL.y,shL.z})*Mat4::scale({0.13f,0.15f,0.14f}),-1,jacketLight);
+        draw(sphere,root*Mat4::translation({shR.x,shR.y,shR.z})*Mat4::scale({0.13f,0.15f,0.14f}),-1,jacketLight);
+        drawBone(root,shL,elL,0.078f,jacket,6); drawBone(root,elL,handL,0.060f,jacketLight,6);
+        drawBone(root,shR,elR,0.078f,jacket,6); drawBone(root,elR,handR,0.060f,jacketLight,6);
+        draw(sphere,root*Mat4::translation({handL.x,handL.y,handL.z})*Mat4::scale({0.09f,0.10f,0.09f}),-1,skin);
+        draw(sphere,root*Mat4::translation({handR.x,handR.y,handR.z})*Mat4::scale({0.09f,0.10f,0.09f}),-1,skin);
+
+        // Hood, head, ears and face details; hood silhouette remains visible from behind.
+        draw(sphere,root*Mat4::translation({0,1.59f+bob,-0.055f})*Mat4::scale({0.29f,0.31f,0.27f}),-1,jacket,0.04f);
+        draw(sphere,root*Mat4::translation({0,1.585f+bob,0.035f})*Mat4::scale({0.235f,0.265f,0.225f}),-1,skin);
+        draw(sphere,root*Mat4::translation({0,1.755f+bob,-0.025f})*Mat4::scale({0.25f,0.105f,0.24f}),-1,{0.055f,0.045f,0.038f});
+        draw(sphere,root*Mat4::translation({-0.235f,1.57f+bob,0.015f})*Mat4::scale({0.05f,0.085f,0.06f}),-1,skin);
+        draw(sphere,root*Mat4::translation({0.235f,1.57f+bob,0.015f})*Mat4::scale({0.05f,0.085f,0.06f}),-1,skin);
+        draw(sphere,root*Mat4::translation({-0.075f,1.60f+bob,0.238f})*Mat4::scale({0.027f,0.028f,0.014f}),-1,{0.035f,0.03f,0.025f});
+        draw(sphere,root*Mat4::translation({0.075f,1.60f+bob,0.238f})*Mat4::scale({0.027f,0.028f,0.014f}),-1,{0.035f,0.03f,0.025f});
     }
     void drawHouse(float side,float centerZ,int variant) {
         const float cx=side*(9.3f+0.18f*std::sin(static_cast<float>(variant)*2.1f));
@@ -982,12 +841,13 @@ void main(){ vec2 p=vec2(aPosition.x/uViewport.x*2.0-1.0,1.0-aPosition.y/uViewpo
         const Color teal{0.08f,0.74f,0.67f,0.98f}, red{0.86f,0.20f,0.17f,0.95f}, dark{0.04f,0.07f,0.08f,0.70f};
         ui.rect(18,18,300,118,panel);
         ui.text("MOHALLA MONSOON",32,31,2.15f,white);
-        ui.text("SUPPLIES",32,53,1.9f,pale);
-        ui.text(std::to_string(g.supplies)+"/6",155,53,2.0f,white);
-        ui.text("SCORE",32,73,1.7f,pale); ui.text(std::to_string(g.score),95,73,1.8f,white);
-        ui.text("HEALTH",32,94,1.7f,pale);
-        ui.rect(110,96,175,13,{0.10f,0.13f,0.14f,0.98f});
-        ui.rect(110,96,175*(g.health/100.0f),13,g.health>35?teal:red);
+        ui.text("MISSION - COLLECT 6 SUPPLIES",32,49,1.55f,pale);
+        ui.text("SUPPLIES",32,70,1.9f,pale);
+        ui.text(std::to_string(g.supplies)+"/6",155,70,2.0f,white);
+        ui.text("SCORE",32,89,1.7f,pale); ui.text(std::to_string(g.score),95,89,1.8f,white);
+        ui.text("HEALTH",32,110,1.7f,pale);
+        ui.rect(110,112,175,13,{0.10f,0.13f,0.14f,0.98f});
+        ui.rect(110,112,175*(g.health/100.0f),13,g.health>35?teal:red);
         const float joyX=w*0.17f, joyY=h*0.79f, joyR=h*0.115f;
         ui.circle(joyX,joyY,joyR,{0.08f,0.12f,0.14f,0.45f});
         ui.circle(joyX,joyY,joyR*0.98f,{0.69f,0.82f,0.84f,0.45f});
@@ -1074,29 +934,53 @@ struct Engine {
     float width=1280,height=720,joyCenterX=0,joyCenterY=0,joyRadius=100;
     int joyPointer=-1;
     bool sprintPointer=false;
+    int sprintPointerId=-1;
     std::chrono::steady_clock::time_point previous=std::chrono::steady_clock::now();
 
     bool initDisplay(ANativeWindow* window) {
+        MM_LOGI("Startup: initDisplay begin");
         display=eglGetDisplay(EGL_DEFAULT_DISPLAY);
-        if(display==EGL_NO_DISPLAY) return false;
+        if(display==EGL_NO_DISPLAY) { MM_LOGE("EGL startup: eglGetDisplay failed (0x%x)",eglGetError()); return false; }
         EGLint major=0,minor=0;
-        if(!eglInitialize(display,&major,&minor)) return false;
+        if(!eglInitialize(display,&major,&minor)) { MM_LOGE("EGL startup: eglInitialize failed (0x%x)",eglGetError()); return false; }
+        MM_LOGI("EGL initialized %d.%d",major,minor);
         const EGLint attribs[]={EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_SURFACE_TYPE,EGL_WINDOW_BIT,
             EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,16,EGL_NONE};
+        const EGLint fallbackAttribs[]={EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_SURFACE_TYPE,EGL_WINDOW_BIT,
+            EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_DEPTH_SIZE,16,EGL_NONE};
         EGLConfig config{}; EGLint count=0;
-        if(!eglChooseConfig(display,attribs,&config,1,&count)||count==0) return false;
-        EGLint format=0; eglGetConfigAttrib(display,config,EGL_NATIVE_VISUAL_ID,&format);
-        ANativeWindow_setBuffersGeometry(window,0,0,format);
+        EGLBoolean chose=eglChooseConfig(display,attribs,&config,1,&count);
+        if(!chose || count==0) {
+            MM_LOGE("EGL config with alpha failed (0x%x); trying fallback",eglGetError());
+            count=0;
+            chose=eglChooseConfig(display,fallbackAttribs,&config,1,&count);
+        }
+        if(!chose || count==0) { MM_LOGE("EGL startup: no compatible ES2 window config (0x%x)",eglGetError()); return false; }
+        EGLint format=0;
+        if(!eglGetConfigAttrib(display,config,EGL_NATIVE_VISUAL_ID,&format)) {
+            MM_LOGE("EGL startup: eglGetConfigAttrib failed (0x%x)",eglGetError()); return false;
+        }
+        if(ANativeWindow_setBuffersGeometry(window,0,0,format)!=0) MM_LOGE("Could not set native window buffer geometry");
         const EGLint ctxAttrs[]={EGL_CONTEXT_CLIENT_VERSION,2,EGL_NONE};
         context=eglCreateContext(display,config,EGL_NO_CONTEXT,ctxAttrs);
+        if(context==EGL_NO_CONTEXT) { MM_LOGE("EGL startup: eglCreateContext failed (0x%x)",eglGetError()); return false; }
         surface=eglCreateWindowSurface(display,config,window,nullptr);
-        if(context==EGL_NO_CONTEXT||surface==EGL_NO_SURFACE) return false;
-        if(!eglMakeCurrent(display,surface,surface,context)) return false;
+        if(surface==EGL_NO_SURFACE) { MM_LOGE("EGL startup: eglCreateWindowSurface failed (0x%x)",eglGetError()); return false; }
+        if(!eglMakeCurrent(display,surface,surface,context)) { MM_LOGE("EGL startup: eglMakeCurrent failed (0x%x)",eglGetError()); return false; }
+        MM_LOGI("EGL context and window surface ready");
         EGLint w=0,h=0; eglQuerySurface(display,surface,EGL_WIDTH,&w); eglQuerySurface(display,surface,EGL_HEIGHT,&h);
         width=static_cast<float>(std::max(1,w)); height=static_cast<float>(std::max(1,h));
-        renderer.initialize(app->activity->assetManager); renderer.resize(w,h);
+        if(!MM_BOOT_DIAGNOSTIC_ONLY) {
+            MM_LOGI("Startup: initializing renderer and textures");
+            renderer.initialize(app->activity->assetManager);
+            renderer.resize(w,h);
+        } else {
+            MM_LOGI("BOOT DIAGNOSTIC: renderer, textures and audio deliberately skipped");
+        }
         initialized=true; previous=std::chrono::steady_clock::now();
-        if(!audioStarted) { audio.start(); audioStarted=true; }
+        if(!MM_BOOT_DIAGNOSTIC_ONLY && !audioStarted && ENABLE_RAIN_AUDIO) {
+            MM_LOGI("Startup: initializing rain audio"); audio.start(); audioStarted=true;
+        }
         MM_LOGI("Display ready %dx%d",w,h);
         return true;
     }
@@ -1130,16 +1014,21 @@ struct Engine {
             if((x-joyCenterX)*(x-joyCenterX)+(y-joyCenterY)*(y-joyCenterY)<joyRadius*joyRadius*2.0f) {
                 joystickActive=true; joyPointer=id; updateJoy(x,y); return 1;
             }
-            if(x>w*0.80f && y>h*0.55f) {
-                if(game.failed||game.completed) game.reset();
-                else if(game.paused) game.paused=false;
-                else game.jumpRequest=true;
-                return 1;
-            }
-            if(x>w*0.68f && x<w*0.82f && y>h*0.59f) { sprintPointer=true; game.sprintHeld=true; return 1; }
+            // Pause is deliberately handled before gameplay buttons.
             if(x>w*0.90f && y<h*0.23f) {
                 if(game.failed||game.completed) game.reset();
                 else game.paused=!game.paused;
+                return 1;
+            }
+            // RUN gets its own left button hitbox; do not let JUMP swallow it.
+            if(x>w*0.675f && x<w*0.805f && y>h*0.60f) {
+                sprintPointer=true; sprintPointerId=id; game.sprintHeld=true; return 1;
+            }
+            // JUMP is limited to the right-hand button instead of the whole right side.
+            if(x>w*0.815f && y>h*0.60f) {
+                if(game.failed||game.completed) game.reset();
+                else if(game.paused) game.paused=false;
+                else game.jumpRequest=true;
                 return 1;
             }
             if((game.failed||game.completed||game.paused) && x>w*0.27f && x<w*0.73f && y>h*0.27f && y<h*0.76f) {
@@ -1159,18 +1048,48 @@ struct Engine {
             const int index=(action&AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)>>AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
             const int id=(index>=0 && static_cast<size_t>(index)<n)?AMotionEvent_getPointerId(event,index):-1;
             if(id==joyPointer || masked==AMOTION_EVENT_ACTION_CANCEL) { joystickActive=false; joyPointer=-1; game.moveX=game.moveY=0; }
-            if(sprintPointer) { sprintPointer=false; game.sprintHeld=false; }
+            if(masked==AMOTION_EVENT_ACTION_CANCEL || id==sprintPointerId) {
+                sprintPointer=false; sprintPointerId=-1; game.sprintHeld=false;
+            }
             return 1;
         }
         return 1;
     }
 };
 
+static void hideSystemBars(ANativeActivity* activity) {
+    if(!activity || !activity->env || !activity->clazz) return;
+    JNIEnv* env=activity->env;
+    jclass activityClass=env->GetObjectClass(activity->clazz);
+    if(!activityClass) return;
+    jmethodID getWindow=env->GetMethodID(activityClass,"getWindow","()Landroid/view/Window;");
+    if(!getWindow) { env->DeleteLocalRef(activityClass); return; }
+    jobject window=env->CallObjectMethod(activity->clazz,getWindow);
+    if(!window || env->ExceptionCheck()) {
+        if(env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(activityClass); return;
+    }
+    jclass windowClass=env->GetObjectClass(window);
+    jmethodID getDecor=windowClass?env->GetMethodID(windowClass,"getDecorView","()Landroid/view/View;"):nullptr;
+    jobject decor=getDecor?env->CallObjectMethod(window,getDecor):nullptr;
+    if(decor && !env->ExceptionCheck()) {
+        jclass viewClass=env->GetObjectClass(decor);
+        jmethodID setUi=viewClass?env->GetMethodID(viewClass,"setSystemUiVisibility","(I)V"):nullptr;
+        if(setUi) env->CallVoidMethod(decor,setUi,5894); // immersive-sticky + layout stable/fullscreen/hide-nav
+        if(env->ExceptionCheck()) env->ExceptionClear();
+        if(viewClass) env->DeleteLocalRef(viewClass);
+        env->DeleteLocalRef(decor);
+    } else if(env->ExceptionCheck()) env->ExceptionClear();
+    if(windowClass) env->DeleteLocalRef(windowClass);
+    env->DeleteLocalRef(window); env->DeleteLocalRef(activityClass);
+}
+
 static void handleAppCmd(android_app* app,int32_t cmd) {
     auto* e=static_cast<Engine*>(app->userData);
     if(!e) return;
     switch(cmd) {
     case APP_CMD_INIT_WINDOW:
+        hideSystemBars(app->activity);
         if(app->window && !e->initialized) {
             if(!e->initDisplay(app->window)) MM_LOGE("Failed to initialize EGL display");
         }
@@ -1179,7 +1098,8 @@ static void handleAppCmd(android_app* app,int32_t cmd) {
         if(e->initialized) e->termDisplay();
         break;
     case APP_CMD_LOST_FOCUS:
-        e->game.moveX=e->game.moveY=0; e->game.sprintHeld=false; break;
+        e->game.moveX=e->game.moveY=0; e->game.sprintHeld=false;
+        e->joystickActive=false; e->joyPointer=-1; e->sprintPointer=false; e->sprintPointerId=-1; break;
     default: break;
     }
 }
@@ -1190,9 +1110,11 @@ static int32_t handleInput(android_app* app,AInputEvent* event) {
 } // namespace mm
 
 void android_main(android_app* app) {
+    MM_LOGI("Native entry: android_main reached");
     mm::Engine engine;
     engine.app=app; app->userData=&engine; app->onAppCmd=mm::handleAppCmd; app->onInputEvent=mm::handleInput;
     engine.game.reset();
+    MM_LOGI("Startup: game state initialized; waiting for window");
     while(!app->destroyRequested) {
         int events=0; android_poll_source* source=nullptr;
         int ident;
@@ -1204,8 +1126,15 @@ void android_main(android_app* app) {
             const auto now=std::chrono::steady_clock::now();
             const float dt=std::chrono::duration<float>(now-engine.previous).count();
             engine.previous=now;
-            engine.game.update(dt);
-            engine.renderer.render(engine.game);
+            if(!mm::MM_BOOT_DIAGNOSTIC_ONLY) {
+                engine.game.update(dt);
+                engine.renderer.render(engine.game);
+            } else {
+                // A persistent teal screen means the native activity and EGL swap loop survived.
+                glViewport(0,0,static_cast<GLsizei>(engine.width),static_cast<GLsizei>(engine.height));
+                glClearColor(0.02f,0.28f,0.22f,1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+            }
             if(eglSwapBuffers(engine.display,engine.surface)==EGL_FALSE) {
                 EGLint err=eglGetError();
                 if(err==EGL_BAD_SURFACE || err==EGL_CONTEXT_LOST) engine.termDisplay();
