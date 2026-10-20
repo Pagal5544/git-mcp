@@ -32,6 +32,8 @@ constexpr int RENDER_TEX_SIZE = 512;
 constexpr int TEX_COUNT = 7;
 // Keep startup conservative on lower-memory Android devices; re-enable after device testing.
 constexpr bool ENABLE_RAIN_AUDIO = false;
+// Temporary diagnostic build: test NativeActivity + EGL without renderer/assets/audio.
+constexpr bool MM_BOOT_DIAGNOSTIC_ONLY = true;
 
 struct Vec3 {
     float x = 0, y = 0, z = 0;
@@ -823,11 +825,17 @@ struct Engine {
         MM_LOGI("EGL context and window surface ready");
         EGLint w=0,h=0; eglQuerySurface(display,surface,EGL_WIDTH,&w); eglQuerySurface(display,surface,EGL_HEIGHT,&h);
         width=static_cast<float>(std::max(1,w)); height=static_cast<float>(std::max(1,h));
-        MM_LOGI("Startup: initializing renderer and textures");
-        renderer.initialize(app->activity->assetManager); renderer.resize(w,h);
+        if(!MM_BOOT_DIAGNOSTIC_ONLY) {
+            MM_LOGI("Startup: initializing renderer and textures");
+            renderer.initialize(app->activity->assetManager);
+            renderer.resize(w,h);
+        } else {
+            MM_LOGI("BOOT DIAGNOSTIC: renderer, textures and audio deliberately skipped");
+        }
         initialized=true; previous=std::chrono::steady_clock::now();
-        if(!audioStarted && ENABLE_RAIN_AUDIO) { MM_LOGI("Startup: initializing rain audio"); audio.start(); audioStarted=true; }
-        else if(!ENABLE_RAIN_AUDIO) { MM_LOGI("Startup: rain audio disabled for compatibility test"); }
+        if(!MM_BOOT_DIAGNOSTIC_ONLY && !audioStarted && ENABLE_RAIN_AUDIO) {
+            MM_LOGI("Startup: initializing rain audio"); audio.start(); audioStarted=true;
+        }
         MM_LOGI("Display ready %dx%d",w,h);
         return true;
     }
@@ -937,8 +945,15 @@ void android_main(android_app* app) {
             const auto now=std::chrono::steady_clock::now();
             const float dt=std::chrono::duration<float>(now-engine.previous).count();
             engine.previous=now;
-            engine.game.update(dt);
-            engine.renderer.render(engine.game);
+            if(!mm::MM_BOOT_DIAGNOSTIC_ONLY) {
+                engine.game.update(dt);
+                engine.renderer.render(engine.game);
+            } else {
+                // A persistent teal screen means the native activity and EGL swap loop survived.
+                glViewport(0,0,static_cast<GLsizei>(engine.width),static_cast<GLsizei>(engine.height));
+                glClearColor(0.02f,0.28f,0.22f,1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+            }
             if(eglSwapBuffers(engine.display,engine.surface)==EGL_FALSE) {
                 EGLint err=eglGetError();
                 if(err==EGL_BAD_SURFACE || err==EGL_CONTEXT_LOST) engine.termDisplay();
