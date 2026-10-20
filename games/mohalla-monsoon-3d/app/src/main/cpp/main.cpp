@@ -578,36 +578,69 @@ void main(){ vec2 p=vec2(aPosition.x/uViewport.x*2.0-1.0,1.0-aPosition.y/uViewpo
         draw(sphere,model,texture,tint,0.05f,1);
     }
     void drawCharacter(const GameState& g) {
+        // Stylized, layered monsoon runner: rain jacket, hood, backpack and articulated limbs.
+        // Keep the mesh procedural so the Android build has no large runtime model dependency.
         Mat4 root=Mat4::translation({g.playerX,g.playerY,g.playerZ})*Mat4::rotateY(g.yaw);
-        draw(sphere,root*Mat4::translation({0,0.02f,0})*Mat4::scale({0.80f,0.035f,0.62f}),-1,{0.10f,0.13f,0.15f},0.8f,0.52f);
-        float stride=g.moving?std::sin(g.gaitPhase)*0.24f:0;
-        float bend=g.moving?std::max(0.0f,std::sin(g.gaitPhase+PI))*0.12f:0;
-        float bob=g.moving?std::abs(std::sin(g.gaitPhase))*0.035f:0;
-        Vec3 hipL(-0.145f,0.77f+bob,0), hipR(0.145f,0.77f+bob,0);
-        Vec3 kneeL(-0.15f,0.43f+bob,stride), kneeR(0.15f,0.43f+bob,-stride);
-        Vec3 ankleL(-0.15f,0.12f+bob,stride*1.48f+bend), ankleR(0.15f,0.12f+bob,-stride*1.48f+bend);
-        Vec3 pants{0.20f,0.24f,0.25f}, skin{0.57f,0.34f,0.23f}, shirt{0.11f,0.30f,0.42f};
-        draw(sphere,root*Mat4::translation({0,0.78f+bob,0})*Mat4::scale({0.38f,0.25f,0.30f}),6,pants,0.04f);
-        drawBone(root,hipL,kneeL,0.105f,pants,6); drawBone(root,kneeL,ankleL,0.078f,pants,6);
-        drawBone(root,hipR,kneeR,0.105f,pants,6); drawBone(root,kneeR,ankleR,0.078f,pants,6);
-        draw(sphere,root*Mat4::translation({ankleL.x,ankleL.y-0.035f,ankleL.z+0.075f})*Mat4::scale({0.20f,0.10f,0.30f}),-1,{0.075f,0.075f,0.08f});
-        draw(sphere,root*Mat4::translation({ankleR.x,ankleR.y-0.035f,ankleR.z+0.075f})*Mat4::scale({0.20f,0.10f,0.30f}),-1,{0.075f,0.075f,0.08f});
-        draw(sphere,root*Mat4::translation({0,1.11f+bob,0})*Mat4::scale({0.45f,0.49f,0.29f}),6,shirt,0.02f);
-        draw(sphere,root*Mat4::translation({0,1.09f+bob,-0.205f})*Mat4::scale({0.31f,0.39f,0.15f}),6,{0.18f,0.20f,0.22f});
-        float armSwing=g.moving?std::sin(g.gaitPhase+PI)*0.28f:0;
-        Vec3 shL(-0.26f,1.30f+bob,0), shR(0.26f,1.30f+bob,0);
-        Vec3 elL(-0.34f,1.06f+bob,armSwing), elR(0.34f,1.06f+bob,-armSwing);
-        Vec3 handL(-0.34f,0.88f+bob,armSwing*1.5f), handR(0.34f,0.88f+bob,-armSwing*1.5f);
-        drawBone(root,shL,elL,0.082f,shirt,6); drawBone(root,elL,handL,0.066f,shirt,6);
-        drawBone(root,shR,elR,0.082f,shirt,6); drawBone(root,elR,handR,0.066f,shirt,6);
-        draw(sphere,root*Mat4::translation({handL.x,handL.y,handL.z})*Mat4::scale({0.115f,0.12f,0.12f}),-1,skin);
-        draw(sphere,root*Mat4::translation({handR.x,handR.y,handR.z})*Mat4::scale({0.115f,0.12f,0.12f}),-1,skin);
-        draw(sphere,root*Mat4::translation({0,1.57f+bob,0.015f})*Mat4::scale({0.235f,0.27f,0.225f}),-1,skin);
-        draw(sphere,root*Mat4::translation({0,1.755f+bob,-0.01f})*Mat4::scale({0.245f,0.105f,0.235f}),-1,{0.07f,0.055f,0.045f});
-        draw(sphere,root*Mat4::translation({-0.235f,1.56f+bob,0.02f})*Mat4::scale({0.055f,0.095f,0.07f}),-1,skin);
-        draw(sphere,root*Mat4::translation({0.235f,1.56f+bob,0.02f})*Mat4::scale({0.055f,0.095f,0.07f}),-1,skin);
-        draw(sphere,root*Mat4::translation({-0.078f,1.59f+bob,0.213f})*Mat4::scale({0.036f,0.034f,0.018f}),-1,{0.04f,0.035f,0.03f});
-        draw(sphere,root*Mat4::translation({0.078f,1.59f+bob,0.213f})*Mat4::scale({0.036f,0.034f,0.018f}),-1,{0.04f,0.035f,0.03f});
+        const float phase=g.gaitPhase;
+        const float stride=g.moving?std::sin(phase)*0.29f:0.0f;
+        const float recovery=g.moving?std::max(0.0f,std::sin(phase+PI))*0.16f:0.0f;
+        const float bob=g.moving?std::abs(std::sin(phase*2.0f))*0.045f:0.0f;
+        const float armSwing=g.moving?std::sin(phase+PI)*0.34f:0.0f;
+        const float lean=g.moving?(g.sprintHeld?0.10f:0.045f):0.0f;
+        const Vec3 pants{0.105f,0.13f,0.16f}, skin{0.48f,0.285f,0.19f};
+        const Vec3 jacket{0.035f,0.24f,0.25f}, jacketLight{0.055f,0.34f,0.32f};
+        const Vec3 trim{0.86f,0.66f,0.22f}, boot{0.055f,0.060f,0.064f};
+        draw(sphere,root*Mat4::translation({0,0.025f,0})*Mat4::scale({0.76f,0.035f,0.59f}),-1,{0.07f,0.09f,0.10f},0.8f,0.52f);
+
+        // Backpack and shoulder straps, visible from the rear camera.
+        draw(sphere,root*Mat4::translation({0,1.12f+bob,-0.285f})*Mat4::scale({0.32f,0.39f,0.18f}),5,{0.12f,0.15f,0.15f},0.12f);
+        draw(sphere,root*Mat4::translation({0,1.14f+bob,-0.382f})*Mat4::scale({0.22f,0.24f,0.025f}),-1,{0.20f,0.25f,0.23f});
+        draw(sphere,root*Mat4::translation({-0.18f,1.25f+bob,-0.19f})*Mat4::scale({0.055f,0.30f,0.045f}),-1,trim);
+        draw(sphere,root*Mat4::translation({0.18f,1.25f+bob,-0.19f})*Mat4::scale({0.055f,0.30f,0.045f}),-1,trim);
+
+        // Pelvis and articulated legs with knees, shin panels and boot soles.
+        draw(sphere,root*Mat4::translation({0,0.78f+bob,0})*Mat4::scale({0.34f,0.23f,0.28f}),6,pants,0.04f);
+        Vec3 hipL(-0.145f,0.76f+bob,0), hipR(0.145f,0.76f+bob,0);
+        Vec3 kneeL(-0.15f,0.43f+bob,stride*0.82f), kneeR(0.15f,0.43f+bob,-stride*0.82f);
+        Vec3 ankleL(-0.15f,0.12f+bob,stride*1.25f+recovery), ankleR(0.15f,0.12f+bob,-stride*1.25f+recovery);
+        drawBone(root,hipL,kneeL,0.092f,pants,6); drawBone(root,kneeL,ankleL,0.068f,pants,6);
+        drawBone(root,hipR,kneeR,0.092f,pants,6); drawBone(root,kneeR,ankleR,0.068f,pants,6);
+        draw(sphere,root*Mat4::translation({kneeL.x,kneeL.y,kneeL.z+0.025f})*Mat4::scale({0.13f,0.13f,0.13f}),-1,{0.13f,0.16f,0.17f});
+        draw(sphere,root*Mat4::translation({kneeR.x,kneeR.y,kneeR.z+0.025f})*Mat4::scale({0.13f,0.13f,0.13f}),-1,{0.13f,0.16f,0.17f});
+        draw(sphere,root*Mat4::translation({ankleL.x,ankleL.y-0.035f,ankleL.z+0.085f})*Mat4::scale({0.21f,0.085f,0.31f}),-1,boot);
+        draw(sphere,root*Mat4::translation({ankleR.x,ankleR.y-0.035f,ankleR.z+0.085f})*Mat4::scale({0.21f,0.085f,0.31f}),-1,boot);
+        draw(sphere,root*Mat4::translation({ankleL.x,ankleL.y-0.075f,ankleL.z+0.09f})*Mat4::scale({0.215f,0.025f,0.315f}),-1,{0.16f,0.17f,0.16f});
+        draw(sphere,root*Mat4::translation({ankleR.x,ankleR.y-0.075f,ankleR.z+0.09f})*Mat4::scale({0.215f,0.025f,0.315f}),-1,{0.16f,0.17f,0.16f});
+
+        // Jacket torso and segmented panels instead of one plain blue capsule.
+        draw(sphere,root*Mat4::translation({0,1.12f+bob,-lean*0.18f})*Mat4::scale({0.42f,0.48f,0.30f}),6,jacket,0.05f);
+        draw(sphere,root*Mat4::translation({0,1.12f+bob,0.246f})*Mat4::scale({0.255f,0.34f,0.028f}),-1,jacketLight,0.05f);
+        draw(sphere,root*Mat4::translation({0,0.89f+bob,0.235f})*Mat4::scale({0.29f,0.055f,0.035f}),-1,trim);
+        draw(sphere,root*Mat4::translation({0,1.43f+bob,0.015f})*Mat4::scale({0.28f,0.12f,0.25f}),-1,jacketLight);
+        // Collar and a small zipper highlight.
+        draw(sphere,root*Mat4::translation({0,1.48f+bob,0.10f})*Mat4::scale({0.17f,0.085f,0.15f}),-1,{0.025f,0.16f,0.17f});
+        draw(sphere,root*Mat4::translation({0,1.20f+bob,0.278f})*Mat4::scale({0.018f,0.25f,0.012f}),-1,trim);
+        for(int k=0;k<3;k++) draw(sphere,root*Mat4::translation({0.035f,1.29f-static_cast<float>(k)*0.075f+bob,0.29f})*Mat4::scale({0.018f,0.018f,0.012f}),-1,{0.72f,0.75f,0.66f});
+
+        // Arms swing opposite the legs; elbow/hand positions follow the gait.
+        Vec3 shL(-0.255f,1.34f+bob,0), shR(0.255f,1.34f+bob,0);
+        Vec3 elL(-0.34f,1.08f+bob,armSwing), elR(0.34f,1.08f+bob,-armSwing);
+        Vec3 handL(-0.34f,0.89f+bob,armSwing*1.42f), handR(0.34f,0.89f+bob,-armSwing*1.42f);
+        draw(sphere,root*Mat4::translation({shL.x,shL.y,shL.z})*Mat4::scale({0.13f,0.15f,0.14f}),-1,jacketLight);
+        draw(sphere,root*Mat4::translation({shR.x,shR.y,shR.z})*Mat4::scale({0.13f,0.15f,0.14f}),-1,jacketLight);
+        drawBone(root,shL,elL,0.078f,jacket,6); drawBone(root,elL,handL,0.060f,jacketLight,6);
+        drawBone(root,shR,elR,0.078f,jacket,6); drawBone(root,elR,handR,0.060f,jacketLight,6);
+        draw(sphere,root*Mat4::translation({handL.x,handL.y,handL.z})*Mat4::scale({0.09f,0.10f,0.09f}),-1,skin);
+        draw(sphere,root*Mat4::translation({handR.x,handR.y,handR.z})*Mat4::scale({0.09f,0.10f,0.09f}),-1,skin);
+
+        // Hood, head, ears and face details; hood silhouette remains visible from behind.
+        draw(sphere,root*Mat4::translation({0,1.59f+bob,-0.055f})*Mat4::scale({0.29f,0.31f,0.27f}),-1,jacket,0.04f);
+        draw(sphere,root*Mat4::translation({0,1.585f+bob,0.035f})*Mat4::scale({0.235f,0.265f,0.225f}),-1,skin);
+        draw(sphere,root*Mat4::translation({0,1.755f+bob,-0.025f})*Mat4::scale({0.25f,0.105f,0.24f}),-1,{0.055f,0.045f,0.038f});
+        draw(sphere,root*Mat4::translation({-0.235f,1.57f+bob,0.015f})*Mat4::scale({0.05f,0.085f,0.06f}),-1,skin);
+        draw(sphere,root*Mat4::translation({0.235f,1.57f+bob,0.015f})*Mat4::scale({0.05f,0.085f,0.06f}),-1,skin);
+        draw(sphere,root*Mat4::translation({-0.075f,1.60f+bob,0.238f})*Mat4::scale({0.027f,0.028f,0.014f}),-1,{0.035f,0.03f,0.025f});
+        draw(sphere,root*Mat4::translation({0.075f,1.60f+bob,0.238f})*Mat4::scale({0.027f,0.028f,0.014f}),-1,{0.035f,0.03f,0.025f});
     }
     void drawHouse(float side,float centerZ,int variant) {
         const float cx=side*(9.3f+0.18f*std::sin(static_cast<float>(variant)*2.1f));
