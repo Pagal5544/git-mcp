@@ -83,6 +83,26 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: Stage the licensed rigged GLB character
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets/characters
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/5bad5aaa0bbb5d0f9cdc934e626f27d0df1e79b8/Models/RiggedFigure/glTF-Binary/RiggedFigure.glb" \
+            -o app/src/main/assets/characters/player.glb
+          size="$(stat -c '%s' app/src/main/assets/characters/player.glb)"
+          echo "Rigged character GLB size: ${size} bytes"
+          test "$size" -gt 20000
+          cat > app/src/main/assets/characters/ATTRIBUTION.txt <<'EOF'
+          Rigged Figure sample asset
+          Copyright: Cesium / Khronos Group contributors
+          Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/RiggedFigure
+          License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+          https://creativecommons.org/licenses/by/4.0/
+          The sample is staged by CI for testing GLB skinning/animation. It is a test figure, not the final photorealistic Mohalla Monsoon player.
+          EOF
+
       - name: Compile native game and package APK
         id: compile
         working-directory: games/mohalla-monsoon-3d
