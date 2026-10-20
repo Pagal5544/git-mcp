@@ -700,12 +700,13 @@ void main(){ vec2 p=vec2(aPosition.x/uViewport.x*2.0-1.0,1.0-aPosition.y/uViewpo
         const Color teal{0.08f,0.74f,0.67f,0.98f}, red{0.86f,0.20f,0.17f,0.95f}, dark{0.04f,0.07f,0.08f,0.70f};
         ui.rect(18,18,300,118,panel);
         ui.text("MOHALLA MONSOON",32,31,2.15f,white);
-        ui.text("SUPPLIES",32,53,1.9f,pale);
-        ui.text(std::to_string(g.supplies)+"/6",155,53,2.0f,white);
-        ui.text("SCORE",32,73,1.7f,pale); ui.text(std::to_string(g.score),95,73,1.8f,white);
-        ui.text("HEALTH",32,94,1.7f,pale);
-        ui.rect(110,96,175,13,{0.10f,0.13f,0.14f,0.98f});
-        ui.rect(110,96,175*(g.health/100.0f),13,g.health>35?teal:red);
+        ui.text("MISSION - COLLECT 6 SUPPLIES",32,49,1.55f,pale);
+        ui.text("SUPPLIES",32,70,1.9f,pale);
+        ui.text(std::to_string(g.supplies)+"/6",155,70,2.0f,white);
+        ui.text("SCORE",32,89,1.7f,pale); ui.text(std::to_string(g.score),95,89,1.8f,white);
+        ui.text("HEALTH",32,110,1.7f,pale);
+        ui.rect(110,112,175,13,{0.10f,0.13f,0.14f,0.98f});
+        ui.rect(110,112,175*(g.health/100.0f),13,g.health>35?teal:red);
         const float joyX=w*0.17f, joyY=h*0.79f, joyR=h*0.115f;
         ui.circle(joyX,joyY,joyR,{0.08f,0.12f,0.14f,0.45f});
         ui.circle(joyX,joyY,joyR*0.98f,{0.69f,0.82f,0.84f,0.45f});
@@ -790,6 +791,7 @@ struct Engine {
     float width=1280,height=720,joyCenterX=0,joyCenterY=0,joyRadius=100;
     int joyPointer=-1;
     bool sprintPointer=false;
+    int sprintPointerId=-1;
     std::chrono::steady_clock::time_point previous=std::chrono::steady_clock::now();
 
     bool initDisplay(ANativeWindow* window) {
@@ -869,16 +871,21 @@ struct Engine {
             if((x-joyCenterX)*(x-joyCenterX)+(y-joyCenterY)*(y-joyCenterY)<joyRadius*joyRadius*2.0f) {
                 joystickActive=true; joyPointer=id; updateJoy(x,y); return 1;
             }
-            if(x>w*0.80f && y>h*0.55f) {
-                if(game.failed||game.completed) game.reset();
-                else if(game.paused) game.paused=false;
-                else game.jumpRequest=true;
-                return 1;
-            }
-            if(x>w*0.68f && x<w*0.82f && y>h*0.59f) { sprintPointer=true; game.sprintHeld=true; return 1; }
+            // Pause is deliberately handled before gameplay buttons.
             if(x>w*0.90f && y<h*0.23f) {
                 if(game.failed||game.completed) game.reset();
                 else game.paused=!game.paused;
+                return 1;
+            }
+            // RUN gets its own left button hitbox; do not let JUMP swallow it.
+            if(x>w*0.675f && x<w*0.805f && y>h*0.60f) {
+                sprintPointer=true; sprintPointerId=id; game.sprintHeld=true; return 1;
+            }
+            // JUMP is limited to the right-hand button instead of the whole right side.
+            if(x>w*0.815f && y>h*0.60f) {
+                if(game.failed||game.completed) game.reset();
+                else if(game.paused) game.paused=false;
+                else game.jumpRequest=true;
                 return 1;
             }
             if((game.failed||game.completed||game.paused) && x>w*0.27f && x<w*0.73f && y>h*0.27f && y<h*0.76f) {
@@ -898,18 +905,48 @@ struct Engine {
             const int index=(action&AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)>>AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
             const int id=(index>=0 && static_cast<size_t>(index)<n)?AMotionEvent_getPointerId(event,index):-1;
             if(id==joyPointer || masked==AMOTION_EVENT_ACTION_CANCEL) { joystickActive=false; joyPointer=-1; game.moveX=game.moveY=0; }
-            if(sprintPointer) { sprintPointer=false; game.sprintHeld=false; }
+            if(masked==AMOTION_EVENT_ACTION_CANCEL || id==sprintPointerId) {
+                sprintPointer=false; sprintPointerId=-1; game.sprintHeld=false;
+            }
             return 1;
         }
         return 1;
     }
 };
 
+static void hideSystemBars(ANativeActivity* activity) {
+    if(!activity || !activity->env || !activity->clazz) return;
+    JNIEnv* env=activity->env;
+    jclass activityClass=env->GetObjectClass(activity->clazz);
+    if(!activityClass) return;
+    jmethodID getWindow=env->GetMethodID(activityClass,"getWindow","()Landroid/view/Window;");
+    if(!getWindow) { env->DeleteLocalRef(activityClass); return; }
+    jobject window=env->CallObjectMethod(activity->clazz,getWindow);
+    if(!window || env->ExceptionCheck()) {
+        if(env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(activityClass); return;
+    }
+    jclass windowClass=env->GetObjectClass(window);
+    jmethodID getDecor=windowClass?env->GetMethodID(windowClass,"getDecorView","()Landroid/view/View;"):nullptr;
+    jobject decor=getDecor?env->CallObjectMethod(window,getDecor):nullptr;
+    if(decor && !env->ExceptionCheck()) {
+        jclass viewClass=env->GetObjectClass(decor);
+        jmethodID setUi=viewClass?env->GetMethodID(viewClass,"setSystemUiVisibility","(I)V"):nullptr;
+        if(setUi) env->CallVoidMethod(decor,setUi,5894); // immersive-sticky + layout stable/fullscreen/hide-nav
+        if(env->ExceptionCheck()) env->ExceptionClear();
+        if(viewClass) env->DeleteLocalRef(viewClass);
+        env->DeleteLocalRef(decor);
+    } else if(env->ExceptionCheck()) env->ExceptionClear();
+    if(windowClass) env->DeleteLocalRef(windowClass);
+    env->DeleteLocalRef(window); env->DeleteLocalRef(activityClass);
+}
+
 static void handleAppCmd(android_app* app,int32_t cmd) {
     auto* e=static_cast<Engine*>(app->userData);
     if(!e) return;
     switch(cmd) {
     case APP_CMD_INIT_WINDOW:
+        hideSystemBars(app->activity);
         if(app->window && !e->initialized) {
             if(!e->initDisplay(app->window)) MM_LOGE("Failed to initialize EGL display");
         }
@@ -918,7 +955,8 @@ static void handleAppCmd(android_app* app,int32_t cmd) {
         if(e->initialized) e->termDisplay();
         break;
     case APP_CMD_LOST_FOCUS:
-        e->game.moveX=e->game.moveY=0; e->game.sprintHeld=false; break;
+        e->game.moveX=e->game.moveY=0; e->game.sprintHeld=false;
+        e->joystickActive=false; e->joyPointer=-1; e->sprintPointer=false; e->sprintPointerId=-1; break;
     default: break;
     }
 }
