@@ -89,18 +89,18 @@ jobs:
           set -euo pipefail
           mkdir -p app/src/main/assets/characters
           curl --fail --location --retry 3 --retry-delay 2 \
-            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/5bad5aaa0bbb5d0f9cdc934e626f27d0df1e79b8/Models/RiggedFigure/glTF-Binary/RiggedFigure.glb" \
+            "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/03251428e295f20d8c4a65ddbbd7dafe4f251c6d/Models/CesiumMan/glTF-Binary/CesiumMan.glb" \
             -o app/src/main/assets/characters/player.glb
           size="$(stat -c '%s' app/src/main/assets/characters/player.glb)"
           echo "Rigged character GLB size: ${size} bytes"
           test "$size" -gt 20000
           cat > app/src/main/assets/characters/ATTRIBUTION.txt <<'EOF'
-          Rigged Figure sample asset
+          Cesium Man textured animated character sample
           Copyright: Cesium / Khronos Group contributors
-          Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/RiggedFigure
+          Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CesiumMan
           License: Creative Commons Attribution 4.0 International (CC BY 4.0)
           https://creativecommons.org/licenses/by/4.0/
-          The sample is staged by CI for testing GLB skinning/animation. It is a test figure, not the final photorealistic Mohalla Monsoon player.
+          The sample is staged by CI to exercise skinned animation and embedded base-colour texture rendering. It includes a Cesium logo/trademark on the authored model and is an interim character asset, not a custom South Asian rain-jacket photorealistic player.
           EOF
 
       - name: Compile native game and package APK
