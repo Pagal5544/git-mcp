@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-android-game:
@@ -84,8 +84,41 @@ jobs:
           gradle-version: "8.7"
 
       - name: Compile native game and package APK
+        id: compile
         working-directory: games/mohalla-monsoon-3d
-        run: gradle --no-daemon --stacktrace assembleDebug
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee "$RUNNER_TEMP/mohalla-gradle-build.log"
+          result=${PIPESTATUS[0]}
+          echo "exit_code=$result" >> "$GITHUB_OUTPUT"
+          exit "$result"
+
+      - name: Preserve compile failure diagnostics on this feature branch
+        if: failure() && steps.compile.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p build-diagnostics
+          cp "$RUNNER_TEMP/mohalla-gradle-build.log" build-diagnostics/latest-gradle-failure.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$GITHUB_REF_NAME"
+          git switch -C "$GITHUB_REF_NAME" "origin/$GITHUB_REF_NAME"
+          git add build-diagnostics/latest-gradle-failure.log
+          git commit -m "Record native game build failure diagnostics [skip ci]"
+          git push origin "$GITHUB_REF_NAME"
+
+      - name: Upload build log for troubleshooting
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mohalla-monsoon-build-log
+          path: ${{ runner.temp }}/mohalla-gradle-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Verify APK distribution size
         id: apk
