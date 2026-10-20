@@ -1,0 +1,100 @@
+name: Mohalla Monsoon 3D Android APK
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "games/mohalla-monsoon-3d/**"
+      - ".github/workflows/mohalla-monsoon-3d.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-game:
+    name: Build native C++ game APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python asset generator
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install procedural texture generator dependencies
+        run: python -m pip install --upgrade pip numpy pillow
+
+      - name: Install Android SDK, CMake and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept SDK licences and install native build packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Generate realistic surface texture pack
+        working-directory: games/mohalla-monsoon-3d
+        run: |
+          python tools/generate_assets.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("app/src/main/assets/textures")
+          files = sorted(p.glob("*.rgbtex"))
+          total = sum(f.stat().st_size for f in files)
+          print(f"Texture files: {len(files)}; payload: {total:,} bytes")
+          assert len(files) == 7, f"Expected 7 texture maps, found {len(files)}"
+          assert total > 50_000_000, f"Texture pack unexpectedly small: {total}"
+          PY
+
+      - name: Set up Gradle 8.7
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: "8.7"
+
+      - name: Compile native game and package APK
+        working-directory: games/mohalla-monsoon-3d
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK distribution size
+        id: apk
+        run: |
+          APK="games/mohalla-monsoon-3d/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          SIZE="$(stat -c%s "$APK")"
+          echo "APK bytes: $SIZE"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          if [ "$SIZE" -le 50000000 ]; then
+            echo "The APK is smaller than the requested 50 MB distribution target."
+            exit 1
+          fi
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mohalla-monsoon-debug-apk
+          path: games/mohalla-monsoon-3d/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Mohalla Monsoon Mission" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: `$GITHUB_REF_NAME`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Native engine: C++17 + OpenGL ES 2.0" >> "$GITHUB_STEP_SUMMARY"
+          echo "- APK byte target: greater than 50,000,000" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f games/mohalla-monsoon-3d/app/build/outputs/apk/debug/app-debug.apk ]; then
+            stat -c '- APK size: %s bytes' games/mohalla-monsoon-3d/app/build/outputs/apk/debug/app-debug.apk >> "$GITHUB_STEP_SUMMARY"
+          fi
