@@ -28,8 +28,10 @@
 namespace mm {
 constexpr float PI = 3.14159265358979323846f;
 constexpr int TEX_SIZE = 2048;
-constexpr int RENDER_TEX_SIZE = 1024;
+constexpr int RENDER_TEX_SIZE = 512;
 constexpr int TEX_COUNT = 7;
+// Keep startup conservative on lower-memory Android devices; re-enable after device testing.
+constexpr bool ENABLE_RAIN_AUDIO = false;
 
 struct Vec3 {
     float x = 0, y = 0, z = 0;
@@ -824,7 +826,8 @@ struct Engine {
         MM_LOGI("Startup: initializing renderer and textures");
         renderer.initialize(app->activity->assetManager); renderer.resize(w,h);
         initialized=true; previous=std::chrono::steady_clock::now();
-        if(!audioStarted) { MM_LOGI("Startup: initializing rain audio"); audio.start(); audioStarted=true; }
+        if(!audioStarted && ENABLE_RAIN_AUDIO) { MM_LOGI("Startup: initializing rain audio"); audio.start(); audioStarted=true; }
+        else if(!ENABLE_RAIN_AUDIO) { MM_LOGI("Startup: rain audio disabled for compatibility test"); }
         MM_LOGI("Display ready %dx%d",w,h);
         return true;
     }
