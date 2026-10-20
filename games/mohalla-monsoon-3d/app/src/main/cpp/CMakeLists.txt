@@ -6,16 +6,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(NATIVE_APP_GLUE_DIR "${ANDROID_NDK}/sources/android/native_app_glue")
-add_library(native_app_glue STATIC "${NATIVE_APP_GLUE_DIR}/android_native_app_glue.c")
-target_include_directories(native_app_glue PUBLIC "${NATIVE_APP_GLUE_DIR}")
 
-add_library(mohalla SHARED main.cpp)
+# Compile the glue directly into the shared library. Android's NativeActivity
+# loader looks up ANativeActivity_onCreate in libmohalla.so at load time; an
+# unreferenced static-archive member can be omitted by the linker.
+add_library(mohalla SHARED
+    main.cpp
+    "${NATIVE_APP_GLUE_DIR}/android_native_app_glue.c"
+)
+target_include_directories(mohalla PRIVATE "${NATIVE_APP_GLUE_DIR}")
 
 target_compile_options(mohalla PRIVATE
     -Wall -Wextra -Wno-unused-parameter -O2
 )
 target_link_libraries(mohalla
-    native_app_glue
     android
     log
     EGL
