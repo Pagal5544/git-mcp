@@ -902,14 +902,13 @@ static int32_t handleInput(android_app* app,AInputEvent* event) {
 } // namespace mm
 
 void android_main(android_app* app) {
-    app_dummy();
     mm::Engine engine;
     engine.app=app; app->userData=&engine; app->onAppCmd=mm::handleAppCmd; app->onInputEvent=mm::handleInput;
     engine.game.reset();
     while(!app->destroyRequested) {
         int events=0; android_poll_source* source=nullptr;
         int ident;
-        while((ident=ALooper_pollAll(engine.initialized?0:-1,nullptr,&events,reinterpret_cast<void**>(&source)))>=0) {
+        while((ident=ALooper_pollOnce(engine.initialized?0:-1,nullptr,&events,reinterpret_cast<void**>(&source)))>=0) {
             if(source) source->process(app,source);
             if(app->destroyRequested) break;
         }
