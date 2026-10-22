@@ -14,15 +14,18 @@ The deployed Worker is cloud-hosted. **Termux does not need to be running and th
 
 ## MCP tool reference
 
-The OAuth implementation in `feat/github-oauth-mcp` registers these 14 tools.
+The OAuth implementation in `feat/github-oauth-mcp` registers these 15 tools.
 
 ### Repository and file access
 
+By default, repository-scoped tools use the configured `GITHUB_OWNER` and `GITHUB_REPO`. To work on another accessible repository, pass `owner` and `repo` to the relevant tools. This lets you create a repository and then create branches, read/write files, manage issues and pull requests, and run workflows there without changing the Worker configuration.
+
 | Tool | Purpose | Inputs |
 |---|---|---|
-| `github_repo_info` | Get configured repository metadata | None |
-| `github_get_file` | Read file content and return its SHA, size and GitHub URL | `path`, optional `ref` |
-| `github_list_directory` | List files/directories at a repository path | Optional `path`, `ref` |
+| `github_repo_info` | Get repository metadata | Optional `owner`, `repo` |
+| `github_create_repository` | Create a repository for the authenticated GitHub account | `name`; optional `description`, `private`, `auto_init`, `gitignore_template`, `license_template` |
+| `github_get_file` | Read file content and return its SHA, size and GitHub URL | `path`, optional `ref`, `owner`, `repo` |
+| `github_list_directory` | List files/directories at a repository path | Optional `path`, `ref`, `owner`, `repo` |
 
 ### File changes — each operation commits to the selected branch
 
@@ -32,7 +35,7 @@ The OAuth implementation in `feat/github-oauth-mcp` registers these 14 tools.
 | `github_update_file` | Update an existing file and commit it | `path`, `content`, `message`, `branch` |
 | `github_delete_file` | Delete a file and commit the deletion | `path`, `message`, `branch` |
 
-**Safety:** these operations change GitHub directly. Verify the repository, branch and target path before writing or deleting. Prefer a test branch for experiments.
+**Safety:** these operations change GitHub directly. Verify the repository, branch and target path before writing or deleting. Prefer a test branch for experiments. The file mutation tools accept optional `owner` and `repo`, so they can write to a repository created with `github_create_repository`.
 
 ### Branches and pull requests
 
@@ -62,6 +65,8 @@ The OAuth implementation in `feat/github-oauth-mcp` registers these 14 tools.
 6. Verify write access separately by creating a small test file on the intended branch and reading it back with `github_get_file`.
 
 A tool list confirms discovery, not end-to-end operation. Successful repository/workflow calls confirm read access. A successful create-file operation followed by a read-back confirms the write path.
+
+Repository creation calls GitHub's authenticated-user repository endpoint and verifies that the token's account matches `GITHUB_OWNER`. For classic personal access tokens, public repository creation requires `public_repo` or `repo` scope and private repository creation requires `repo` scope. Fine-grained tokens need repository-creation write permission (or the supported administration-write permission). Repository creation defaults to private and initializes a README. The GitHub token must be authorized for the requested operations; a write token scoped only to the existing repository may not be able to create additional repositories.
 
 ## Cloudflare configuration
 
@@ -139,7 +144,7 @@ For the hosted production setup, confirm which branch Cloudflare Git integration
 ## Verification checklist
 
 - [ ] OAuth authorization completes successfully.
-- [ ] Client discovers the expected 14 tools.
+- [ ] Client discovers the expected 15 tools.
 - [ ] `github_repo_info` returns the configured repository.
 - [ ] `github_list_workflows` returns the workflows.
 - [ ] `github_recent_workflow_runs` returns recent runs.
