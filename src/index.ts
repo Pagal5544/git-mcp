@@ -18,9 +18,11 @@ export class GitMcp extends McpAgent<
   });
 
   async init() {
-    const accessToken = this.props?.accessToken;
-    if (!accessToken) {
-      throw new Error("Missing GitHub OAuth access token for this MCP session. Reconnect with GitHub OAuth.");
+    const sessionProps = this.props;
+    const accessToken = sessionProps?.accessToken;
+    const sessionLogin = sessionProps?.login;
+    if (!accessToken || !sessionLogin) {
+      throw new Error("Missing GitHub OAuth session identity or access token. Reconnect with GitHub OAuth.");
     }
 
     const headers = {
@@ -42,7 +44,7 @@ export class GitMcp extends McpAgent<
     };
 
     const repoApiFor = (owner?: string, repo?: string) => {
-      const targetOwner = owner?.trim() || this.props.login;
+      const targetOwner = owner?.trim() || sessionLogin;
       const targetRepo = repo?.trim() || this.env.GITHUB_REPO;
       if (
         !/^[A-Za-z0-9_.-]+$/.test(targetOwner) ||
@@ -159,8 +161,8 @@ export class GitMcp extends McpAgent<
           login: j.data.login,
           name: j.data.name,
           html_url: j.data.html_url,
-          session_login: this.props.login,
-          matches_session: String(j.data.login ?? "").toLowerCase() === this.props.login.toLowerCase(),
+          session_login: sessionLogin,
+          matches_session: String(j.data.login ?? "").toLowerCase() === sessionLogin.toLowerCase(),
         });
       },
     );
@@ -184,8 +186,8 @@ export class GitMcp extends McpAgent<
         const viewer = await readJson(viewerResponse);
         if (viewer.error) return viewer.error;
         const authenticatedOwner = String(viewer.data.login ?? "");
-        if (authenticatedOwner.toLowerCase() !== this.props.login.toLowerCase()) {
-          return fail(403, `OAuth session is for "${this.props.login}", but GitHub authenticated "${authenticatedOwner}". Refusing to create a repository for a mismatched session.`);
+        if (authenticatedOwner.toLowerCase() !== sessionLogin.toLowerCase()) {
+          return fail(403, `OAuth session is for "${sessionLogin}", but GitHub authenticated "${authenticatedOwner}". Refusing to create a repository for a mismatched session.`);
         }
 
         const body: Record<string, unknown> = {
