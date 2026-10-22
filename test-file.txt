@@ -1,0 +1,2 @@
+Git MCP write test
+Created to verify GitHub MCP file-write access.
