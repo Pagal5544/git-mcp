@@ -14,14 +14,15 @@ The deployed Worker is cloud-hosted. **Termux does not need to be running and th
 
 ## MCP tool reference
 
-The OAuth implementation in `feat/github-oauth-mcp` registers these 15 tools.
+The OAuth implementation in `feat/github-oauth-mcp` registers these 16 tools. GitHub API calls use the access token from the current OAuth session, not a shared account token.
 
 ### Repository and file access
 
-By default, repository-scoped tools use the configured `GITHUB_OWNER` and `GITHUB_REPO`. To work on another accessible repository, pass `owner` and `repo` to the relevant tools. This lets you create a repository and then create branches, read/write files, manage issues and pull requests, and run workflows there without changing the Worker configuration.
+By default, repository-scoped tools use the GitHub account authenticated in the current OAuth session as `owner`, and `GITHUB_REPO` as the default repository name. Use `github_authenticated_user` to verify the active account. To target another repository, pass `owner` and `repo`; the OAuth account must have permission to access it. Tokens and identities are isolated per OAuth session, so `Pagal5544`, `uhackman-cpu`, and `shivaytprep-droid` can each authorize their own sessions without a shared GitHub token. Repository creation occurs under the currently authenticated account.
 
 | Tool | Purpose | Inputs |
 |---|---|---|
+| `github_authenticated_user` | Show the GitHub account authorized in this OAuth session | None |
 | `github_repo_info` | Get repository metadata | Optional `owner`, `repo` |
 | `github_create_repository` | Create a repository for the authenticated GitHub account | `name`; optional `description`, `private`, `auto_init`, `gitignore_template`, `license_template` |
 | `github_get_file` | Read file content and return its SHA, size and GitHub URL | `path`, optional `ref`, `owner`, `repo` |
@@ -66,13 +67,13 @@ By default, repository-scoped tools use the configured `GITHUB_OWNER` and `GITHU
 
 A tool list confirms discovery, not end-to-end operation. Successful repository/workflow calls confirm read access. A successful create-file operation followed by a read-back confirms the write path.
 
-Repository creation calls GitHub's authenticated-user repository endpoint and verifies that the token's account matches `GITHUB_OWNER`. For classic personal access tokens, public repository creation requires `public_repo` or `repo` scope and private repository creation requires `repo` scope. Fine-grained tokens need repository-creation write permission (or the supported administration-write permission). Repository creation defaults to private and initializes a README. The GitHub token must be authorized for the requested operations; a write token scoped only to the existing repository may not be able to create additional repositories.
+Repository creation calls GitHub's authenticated-user repository endpoint and verifies that the returned GitHub login matches the current OAuth session identity. OAuth authorization requests the `repo` and `read:user` scopes so that the selected account can create private repositories and access repositories permitted to that account. Repository creation defaults to private and initializes a README. To use a different account, authorize a separate MCP OAuth session while signed into that GitHub account. A session can only change repositories the account is entitled to access.
 
 ## Cloudflare configuration
 
 ### Wrangler configuration
 
-The full configuration is in [`wrangler.jsonc`](./wrangler.jsonc). It currently defines:
+The full configuration is in [`wrangler.jsonc`](https://github.com/Pagal5544/git-mcp/blob/feat/github-oauth-mcp/./wrangler.jsonc). It currently defines:
 
 - Worker name: `git-mcp`
 - Entry point: `src/index.ts`
