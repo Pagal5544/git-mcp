@@ -1,0 +1,4 @@
+GIT MCP connection test
+
+This file was created to verify repository write access.
+No existing files were changed.
