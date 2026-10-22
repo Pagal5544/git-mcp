@@ -5,11 +5,12 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import type { Env } from "./types";
 import { GitHubHandler } from "./github-handler";
+import type { Props } from "./utils";
 
 export class GitMcp extends McpAgent<
   Env,
   Record<string, never>,
-  Record<string, never>
+  Props
 > {
   server = new McpServer({
     name: "git-mcp",
@@ -17,10 +18,13 @@ export class GitMcp extends McpAgent<
   });
 
   async init() {
-    const base = `https://api.github.com/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}`;
+    const accessToken = this.props?.accessToken;
+    if (!accessToken) {
+      throw new Error("Missing GitHub OAuth access token for this MCP session. Reconnect with GitHub OAuth.");
+    }
 
     const headers = {
-      Authorization: `Bearer ${this.env.GITHUB_TOKEN}`,
+      Authorization: `Bearer ${accessToken}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "git-mcp",
@@ -37,14 +41,8 @@ export class GitMcp extends McpAgent<
       });
     };
 
-    const repoApi = (path: string, init: RequestInit = {}) =>
-      api(
-        `/repos/${this.env.GITHUB_OWNER}/${this.env.GITHUB_REPO}${path}`,
-        init,
-      );
-
     const repoApiFor = (owner?: string, repo?: string) => {
-      const targetOwner = owner?.trim() || this.env.GITHUB_OWNER;
+      const targetOwner = owner?.trim() || this.props.login;
       const targetRepo = repo?.trim() || this.env.GITHUB_REPO;
       if (
         !/^[A-Za-z0-9_.-]+$/.test(targetOwner) ||
@@ -129,7 +127,7 @@ export class GitMcp extends McpAgent<
       repo?: string,
     ) => {
       const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
-      return (owner || repo ? repoApiFor(owner, repo) : repoApi)(
+      return repoApiFor(owner, repo)(
         `/contents/${encodePath(path)}${query}`,
       );
     };
@@ -149,6 +147,23 @@ export class GitMcp extends McpAgent<
       },
     );
 
+    this.server.tool(
+      "github_authenticated_user",
+      "Show which GitHub account is authorized for the current MCP OAuth session",
+      {},
+      async () => {
+        const r = await api("/user");
+        const j = await readJson(r);
+        if (j.error) return j.error;
+        return result({
+          login: j.data.login,
+          name: j.data.name,
+          html_url: j.data.html_url,
+          session_login: this.props.login,
+          matches_session: String(j.data.login ?? "").toLowerCase() === this.props.login.toLowerCase(),
+        });
+      },
+    );
 
     // --------------------------------------------------
     // CREATE A NEW REPOSITORY FOR THE AUTHENTICATED USER
@@ -169,8 +184,8 @@ export class GitMcp extends McpAgent<
         const viewer = await readJson(viewerResponse);
         if (viewer.error) return viewer.error;
         const authenticatedOwner = String(viewer.data.login ?? "");
-        if (authenticatedOwner.toLowerCase() !== this.env.GITHUB_OWNER.toLowerCase()) {
-          return fail(403, `GitHub token belongs to "${authenticatedOwner}", but this Worker is configured for "${this.env.GITHUB_OWNER}". Refusing to create a repository in a different account.`);
+        if (authenticatedOwner.toLowerCase() !== this.props.login.toLowerCase()) {
+          return fail(403, `OAuth session is for "${this.props.login}", but GitHub authenticated "${authenticatedOwner}". Refusing to create a repository for a mismatched session.`);
         }
 
         const body: Record<string, unknown> = {
