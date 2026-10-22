@@ -119,7 +119,7 @@ async function redirectToGithub(
 			location: getUpstreamAuthorizeUrl({
 				client_id: clientId,
 				redirect_uri: new URL("/callback", request.url).href,
-				scope: "read:user",
+				scope: "repo read:user",
 				state: stateToken,
 				upstream_url: "https://github.com/login/oauth/authorize",
 			}),
