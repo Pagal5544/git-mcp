@@ -1,0 +1,7 @@
+GIT MCP BRANCH WRITE TEST
+
+Repository: Pagal5544/git-mcp
+Branch: feat/mohalla-monsoon-realistic-3d
+Purpose: Verify that GIT MCP can create and commit a file to the Mohalla Monsoon 3D branch.
+
+This file is a harmless connectivity test and does not modify application source code.
