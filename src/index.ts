@@ -235,14 +235,19 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       return j.error ?? result(j.data);
     });
 
-    this.server.tool("github_create_repository", "Create a new GitHub repository for the authenticated account", {
+    this.server.tool("github_create_repository", "Create a new GitHub repository for the authenticated or selected linked account", {
+      owner: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/).optional(),
       name: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/).refine(n => n !== "." && n !== ".." && !n.toLowerCase().endsWith(".git")),
       description: z.string().max(350).optional(), private: z.boolean().default(true), auto_init: z.boolean().default(true),
       gitignore_template: z.string().max(100).optional(), license_template: z.string().max(100).optional(),
-    }, async ({ name, description, private: isPrivate, auto_init, gitignore_template, license_template }) => {
+    }, async ({ owner, name, description, private: isPrivate, auto_init, gitignore_template, license_template }) => {
+      const targetOwner = owner?.trim() || props.login;
+      let token: string;
+      try { token = await getLinkedToken(targetOwner); }
+      catch (error) { return fail(400, error instanceof Error ? error.message : String(error)); }
       const body = { name, private: isPrivate, auto_init, ...(description !== undefined ? { description } : {}),
         ...(gitignore_template ? { gitignore_template } : {}), ...(license_template ? { license_template } : {}) };
-      const r = await api("/user/repos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r = await api("/user/repos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, token);
       const j = await readJson(r); if (j.error) return j.error;
       return result({ success: true, owner: j.data.owner?.login, repo: j.data.name, full_name: j.data.full_name,
         private: j.data.private, default_branch: j.data.default_branch, html_url: j.data.html_url, clone_url: j.data.clone_url });
