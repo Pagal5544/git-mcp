@@ -253,6 +253,66 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
         private: j.data.private, default_branch: j.data.default_branch, html_url: j.data.html_url, clone_url: j.data.clone_url });
     });
 
+    this.server.tool("github_list_repositories", "List repositories accessible to the primary GitHub account and all linked accounts, grouped by account.", {
+      owner: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/).optional(),
+    }, async ({ owner }) => {
+      const accounts: string[] = [];
+      if (owner) {
+        accounts.push(owner);
+      } else {
+        accounts.push(props.login);
+        let cursor: string | undefined;
+        do {
+          const listed = await this.env.OAUTH_KV.list({ prefix: `linked-account:${props.login.toLowerCase()}:`, ...(cursor ? { cursor } : {}) });
+          for (const item of listed.keys) {
+            const raw = await this.env.OAUTH_KV.get(item.name);
+            if (!raw) continue;
+            try {
+              const account = JSON.parse(raw);
+              if (account.login && !accounts.some(login => login.toLowerCase() === account.login.toLowerCase())) accounts.push(account.login);
+            } catch { /* Ignore malformed linked-account records. */ }
+          }
+          cursor = listed.list_complete ? undefined : listed.cursor;
+        } while (cursor);
+      }
+
+      const results = await Promise.all(accounts.map(async login => {
+        try {
+          const token = await getLinkedToken(login);
+          const repositories: any[] = [];
+          for (let page = 1; page <= 100; page++) {
+            const response = await api(`/user/repos?visibility=all&affiliation=owner,collaborator,organization_member&per_page=100&page=${page}&sort=updated&direction=desc`, {}, token);
+            const parsed = await readJson(response);
+            if (parsed.error) return { account: login, error: parsed.error.content[0].text, repositories };
+            const batch = Array.isArray(parsed.data) ? parsed.data : [];
+            repositories.push(...batch.map((repo: any) => ({
+              name: repo.name, full_name: repo.full_name, owner: repo.owner?.login,
+              private: repo.private, fork: repo.fork, archived: repo.archived,
+              default_branch: repo.default_branch, description: repo.description,
+              html_url: repo.html_url, updated_at: repo.updated_at,
+            })));
+            if (batch.length < 100) break;
+          }
+          return { account: login, count: repositories.length, repositories };
+        } catch (error) {
+          return { account: login, error: error instanceof Error ? error.message : String(error), repositories: [] };
+        }
+      }));
+      return result({ total_accounts: accounts.length, total_repositories: results.reduce((sum, item) => sum + item.repositories.length, 0), accounts: results });
+    });
+
+    this.server.tool("github_delete_repository", "Permanently delete a GitHub repository from the specified linked account.", {
+      owner: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      repo: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+    }, async ({ owner, repo }) => {
+      let token: string;
+      try { token = await getLinkedToken(owner); }
+      catch (error) { return fail(400, error instanceof Error ? error.message : String(error)); }
+      const response = await api(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { method: "DELETE" }, token);
+      if (response.status !== 204) return fail(response.status, await response.text());
+      return result({ success: true, deleted: `${owner}/${repo}`, message: "Repository permanently deleted." });
+    });
+
     this.server.tool("github_get_file", "Read a UTF-8 file from a GitHub repository and branch (returns decoded content and blob SHA)", {
       owner: z.string().min(1).max(100).optional(), repo: z.string().min(1).max(100).optional(),
       path: z.string().min(1), ref: z.string().optional(),
