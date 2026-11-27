@@ -10,33 +10,61 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
   server = new McpServer({ name: "git-mcp", version: "2.1.0" });
 
   async init() {
-    const accessToken = this.props?.accessToken;
-    if (!accessToken) {
+    const props = this.props;
+    const accessToken = props?.accessToken;
+    if (!props?.login || !accessToken) {
       throw new Error("GitHub OAuth session is missing its access token. Reconnect this MCP server through GitHub OAuth.");
     }
 
     const headers = {
-      Authorization: `Bearer ${accessToken}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "git-mcp",
     };
 
-    const api = async (path: string, init: RequestInit = {}) =>
+    const api = async (path: string, init: RequestInit = {}, token = accessToken) =>
       fetch(`https://api.github.com${path}`, {
         ...init,
-        headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
+        headers: { ...headers, Authorization: `Bearer ${token}`, ...(init.headers as Record<string, string> | undefined) },
       });
 
+    const deriveEncryptionKey = async () => {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(this.env.COOKIE_ENCRYPTION_KEY));
+      return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+    };
+    const encryptToken = async (token: string) => {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const key = await deriveEncryptionKey();
+      const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(token));
+      const toBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+      return { iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(encrypted)) };
+    };
+    const decryptToken = async (record: { iv: string; ciphertext: string }) => {
+      const fromBase64 = (value: string) => Uint8Array.from(atob(value), c => c.charCodeAt(0));
+      const key = await deriveEncryptionKey();
+      const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64(record.iv) }, key, fromBase64(record.ciphertext));
+      return new TextDecoder().decode(plain);
+    };
+    const linkedKey = (login: string) => `linked-account:${props.login.toLowerCase()}:${login.toLowerCase()}`;
+    const getLinkedToken = async (login: string) => {
+      if (login.toLowerCase() === props.login.toLowerCase()) return accessToken;
+      const stored = await this.env.OAUTH_KV.get(linkedKey(login));
+      if (!stored) throw new Error(`Account ${login} is not linked. Use github_connect_account first.`);
+      try { return await decryptToken(JSON.parse(stored)); }
+      catch { throw new Error(`Stored token for ${login} could not be decrypted. Reconnect that account.`); }
+    };
+
     const repoApiFor = (owner?: string, repo?: string) => {
-      const targetOwner = owner?.trim() || this.props.login || this.env.GITHUB_OWNER;
+      const targetOwner = owner?.trim() || props.login || this.env.GITHUB_OWNER;
       const targetRepo = repo?.trim() || this.env.GITHUB_REPO;
       if (!/^[A-Za-z0-9_.-]+$/.test(targetOwner) || !/^[A-Za-z0-9_.-]+$/.test(targetRepo) ||
           targetOwner === "." || targetOwner === ".." || targetRepo === "." || targetRepo === "..") {
         throw new Error("Invalid GitHub owner or repository name.");
       }
-      return (path: string, init: RequestInit = {}) =>
-        api(`/repos/${encodeURIComponent(targetOwner)}/${encodeURIComponent(targetRepo)}${path}`, init);
+      return async (path: string, init: RequestInit = {}) => {
+        const token = await getLinkedToken(targetOwner);
+        return api(`/repos/${encodeURIComponent(targetOwner)}/${encodeURIComponent(targetRepo)}${path}`, init, token);
+      };
     };
 
     const result = (value: unknown) => ({
@@ -63,16 +91,113 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       const normalized = value.replace(/\s/g, "");
       const binary = atob(normalized);
       const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
     };
     const getFile = (path: string, ref?: string, owner?: string, repo?: string) => {
       const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
       return repoApiFor(owner, repo)(`/contents/${encodePath(path)}${query}`);
     };
 
+    this.server.tool("github_connect_account", "Start GitHub Device Flow to link another GitHub account to this primary MCP identity", {}, async () => {
+      const response = await fetch("https://github.com/login/device/code", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: new URLSearchParams({ client_id: this.env.GITHUB_OAUTH_CLIENT_ID, scope: "read:user repo workflow" }),
+      });
+      const data = await response.json() as any;
+      if (!response.ok || !data.device_code || !data.user_code) return fail(response.status, JSON.stringify(data));
+      const authorizationId = crypto.randomUUID();
+      await this.env.OAUTH_KV.put(`device-flow:${props.login}:${authorizationId}`, JSON.stringify({
+        device_code: data.device_code, interval: Number(data.interval) || 5,
+        expires_at: Date.now() + (Number(data.expires_in) || 900) * 1000,
+      }), { expirationTtl: Number(data.expires_in) || 900 });
+      return result({
+        authorization_id: authorizationId,
+        user_code: data.user_code,
+        verification_uri: data.verification_uri || "https://github.com/login/device",
+        expires_in: Number(data.expires_in) || 900,
+        polling_interval_seconds: Number(data.interval) || 5,
+        instructions: "Open verification_uri, enter user_code, approve access, then call github_poll_account_authorization with authorization_id.",
+      });
+    });
+
+    this.server.tool("github_poll_account_authorization", "Poll a pending GitHub Device Flow authorization and securely link the approved account", {
+      authorization_id: z.string().uuid(),
+    }, async ({ authorization_id }) => {
+      const key = `device-flow:${props.login}:${authorization_id}`;
+      const stored = await this.env.OAUTH_KV.get(key);
+      if (!stored) return fail(404, "Authorization request not found or expired. Start again with github_connect_account.");
+      const pending = JSON.parse(stored) as { device_code: string; interval: number; expires_at: number };
+      if (Date.now() >= pending.expires_at) {
+        await this.env.OAUTH_KV.delete(key);
+        return fail(410, "Device code expired. Start again with github_connect_account.");
+      }
+      const response = await fetch("https://github.com/login/oauth/access_token", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: this.env.GITHUB_OAUTH_CLIENT_ID,
+          device_code: pending.device_code,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+      });
+      const data = await response.json() as any;
+      if (data.error === "authorization_pending") return result({ status: "pending", retry_after_seconds: pending.interval });
+      if (data.error === "slow_down") {
+        pending.interval += 5;
+        await this.env.OAUTH_KV.put(key, JSON.stringify(pending), { expirationTtl: Math.max(60, Math.ceil((pending.expires_at - Date.now()) / 1000)) });
+        return result({ status: "slow_down", retry_after_seconds: pending.interval });
+      }
+      if (data.error === "expired_token" || data.error === "access_denied") {
+        await this.env.OAUTH_KV.delete(key);
+        return fail(400, data.error === "access_denied" ? "GitHub authorization was denied." : "Device code expired. Start again.");
+      }
+      if (!response.ok || !data.access_token) return fail(response.status, JSON.stringify(data));
+      const linkedUserResponse = await fetch("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${data.access_token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+      });
+      const linkedUser = await linkedUserResponse.json() as any;
+      if (!linkedUserResponse.ok || !linkedUser.login) return fail(linkedUserResponse.status, JSON.stringify(linkedUser));
+      if (linkedUser.login.toLowerCase() === props.login.toLowerCase()) {
+        await this.env.OAUTH_KV.delete(key);
+        return fail(400, "This is already the primary authenticated account.");
+      }
+      const encrypted = await encryptToken(data.access_token);
+      await this.env.OAUTH_KV.put(linkedKey(linkedUser.login), JSON.stringify({
+        ...encrypted, login: linkedUser.login, name: linkedUser.name || null, linked_at: new Date().toISOString(),
+      }));
+      await this.env.OAUTH_KV.delete(key);
+      return result({ status: "linked", login: linkedUser.login, name: linkedUser.name || null });
+    });
+
+    this.server.tool("github_list_authorized_accounts", "List the primary GitHub identity and all additional linked accounts", {}, async () => {
+      const prefix = `linked-account:${props.login.toLowerCase()}:`;
+      const listed = await this.env.OAUTH_KV.list({ prefix });
+      const linked = await Promise.all(listed.keys.map(async item => {
+        const raw = await this.env.OAUTH_KV.get(item.name);
+        if (!raw) return null;
+        try {
+          const account = JSON.parse(raw);
+          return { login: account.login, name: account.name || null, linked_at: account.linked_at || null };
+        } catch { return null; }
+      }));
+      return result({ primary: props.login, linked_accounts: linked.filter(Boolean) });
+    });
+
+    this.server.tool("github_disconnect_account", "Unlink an additional GitHub account from this primary MCP identity", {
+      account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+    }, async ({ account }) => {
+      if (account.toLowerCase() === props.login.toLowerCase()) return fail(400, "The primary account cannot be disconnected with this tool.");
+      const key = linkedKey(account);
+      const existing = await this.env.OAUTH_KV.get(key);
+      if (!existing) return fail(404, `Account ${account} is not linked.`);
+      await this.env.OAUTH_KV.delete(key);
+      return result({ success: true, disconnected: account });
+    });
+
     this.server.tool("github_authenticated_user", "Show which GitHub account is authorized for the current MCP OAuth session", {}, async () => {
       const r = await api("/user"); const j = await readJson(r);
-      return j.error ?? result({ login: j.data.login, id: j.data.id, name: j.data.name, email: this.props.email });
+      return j.error ?? result({ login: j.data.login, id: j.data.id, name: j.data.name, email: props.email });
     });
 
     this.server.tool("github_repo_info", "Get information about the selected GitHub repository", {
@@ -106,7 +231,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
         let text: string;
         if (typeof j.data.content === "string" && j.data.content.trim()) text = decodeBase64(j.data.content);
         else {
-          const raw = await api(`/repos/${encodeURIComponent(owner?.trim() || this.props.login)}/${encodeURIComponent(repo?.trim() || this.env.GITHUB_REPO)}/git/blobs/${j.data.sha}`, {
+          const raw = await repoApiFor(owner, repo)(`/git/blobs/${j.data.sha}`, {
             headers: { Accept: "application/vnd.github.raw+json" },
           });
           if (!raw.ok) return fail(raw.status, await raw.text());

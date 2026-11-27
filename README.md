@@ -71,6 +71,19 @@ Safety: these operations change GitHub directly. Verify repository, branch, and 
 
 Tool discovery confirms only that tools are listed. Successful read calls confirm read access. A successful create-file operation followed by a read-back confirms the write path.
 
+## Multi-account GitHub linking
+
+The OAuth App must have **Enable Device Flow** enabled before using these tools.
+
+1. Call `github_connect_account` from the already-authenticated primary MCP session.
+2. Open the returned `verification_uri` and enter the returned `user_code` while signed in to the additional GitHub account.
+3. Call `github_poll_account_authorization` with the returned `authorization_id` until it reports `status: "linked"`. Respect the returned retry interval.
+4. Call `github_list_authorized_accounts` to view the primary and linked identities.
+5. For repository tools, set `owner` to the linked account's GitHub login. The server uses that account's stored token for that owner.
+6. Use `github_disconnect_account` with `account` to unlink an additional identity.
+
+Additional access tokens are encrypted with AES-GCM before being stored in the configured Cloudflare KV namespace. Device codes are short-lived and scoped to the primary authenticated identity. The primary account cannot be disconnected through the unlink tool.
+
 ## Configuration and security
 
 - Wrangler configuration: `wrangler.jsonc`
