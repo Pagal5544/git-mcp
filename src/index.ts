@@ -180,7 +180,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       if (!response.ok || !data?.access_token) return fail(response.ok ? 502 : response.status, JSON.stringify(data ?? { error: "GitHub did not return an access token." }));
 
       const linkedUserResponse = await fetch("https://api.github.com/user", {
-        headers: { Authorization: `Bearer ${data.access_token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+        headers: { Authorization: `Bearer ${data.access_token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "git-mcp" },
       });
       const linkedUserParsed = await readOAuthJson(linkedUserResponse);
       if (linkedUserParsed.error) return linkedUserParsed.error;
