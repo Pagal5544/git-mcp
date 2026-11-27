@@ -253,6 +253,20 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
         private: j.data.private, default_branch: j.data.default_branch, html_url: j.data.html_url, clone_url: j.data.clone_url });
     });
 
+    this.server.tool("github_delete_repository", "Permanently delete a GitHub repository. Requires the exact repository name as confirmation.", {
+      owner: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      repo: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      confirm_repo_name: z.string().trim().min(1).max(100),
+    }, async ({ owner, repo, confirm_repo_name }) => {
+      if (confirm_repo_name !== repo) return fail(400, "Confirmation mismatch. Set confirm_repo_name to the exact repo name to proceed.");
+      let token: string;
+      try { token = await getLinkedToken(owner); }
+      catch (error) { return fail(400, error instanceof Error ? error.message : String(error)); }
+      const response = await api(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { method: "DELETE" }, token);
+      if (response.status !== 204) return fail(response.status, await response.text());
+      return result({ success: true, deleted: `${owner}/${repo}`, message: "Repository permanently deleted." });
+    });
+
     this.server.tool("github_get_file", "Read a UTF-8 file from a GitHub repository and branch (returns decoded content and blob SHA)", {
       owner: z.string().min(1).max(100).optional(), repo: z.string().min(1).max(100).optional(),
       path: z.string().min(1), ref: z.string().optional(),
