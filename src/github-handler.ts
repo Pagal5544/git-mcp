@@ -65,7 +65,7 @@ function redirectToGithub(request: Request, stateToken: string, clientId: string
   responseHeaders.set("Location", getUpstreamAuthorizeUrl({
     client_id: clientId,
     redirect_uri: new URL("/callback", request.url).href,
-    scope: "read:user repo workflow",
+    scope: "read:user repo workflow delete_repo",
     state: stateToken,
     upstream_url: "https://github.com/login/oauth/authorize",
   }));
