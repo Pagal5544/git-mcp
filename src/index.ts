@@ -98,14 +98,34 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       return repoApiFor(owner, repo)(`/contents/${encodePath(path)}${query}`);
     };
 
+    const readOAuthJson = async (response: Response) => {
+      const body = await response.text();
+      if (!body) {
+        return { error: fail(response.ok ? 502 : response.status, `GitHub OAuth endpoint returned an empty response (HTTP ${response.status}).`) };
+      }
+      try {
+        return { data: JSON.parse(body) as any };
+      } catch {
+        return { error: fail(response.ok ? 502 : response.status, `GitHub OAuth endpoint returned non-JSON content (HTTP ${response.status}): ${body.slice(0, 300)}`) };
+      }
+    };
+
     this.server.tool("github_connect_account", "Start GitHub Device Flow to link another GitHub account to this primary MCP identity", {}, async () => {
+      const clientId = this.env.GITHUB_OAUTH_CLIENT_ID;
+      if (!clientId) return fail(500, "GITHUB_OAUTH_CLIENT_ID is not configured in the Worker.");
+
       const response = await fetch("https://github.com/login/device/code", {
         method: "POST",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: new URLSearchParams({ client_id: this.env.GITHUB_OAUTH_CLIENT_ID, scope: "read:user repo workflow" }),
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: clientId, scope: "read:user repo workflow" }),
       });
-      const data = await response.json() as any;
-      if (!response.ok || !data.device_code || !data.user_code) return fail(response.status, JSON.stringify(data));
+      const parsed = await readOAuthJson(response);
+      if (parsed.error) return parsed.error;
+      const data = parsed.data;
+      if (!response.ok || !data?.device_code || !data?.user_code) {
+        return fail(response.ok ? 502 : response.status, JSON.stringify(data ?? { error: "GitHub did not return a device code." }));
+      }
+
       const authorizationId = crypto.randomUUID();
       await this.env.OAUTH_KV.put(`device-flow:${props.login}:${authorizationId}`, JSON.stringify({
         device_code: data.device_code, interval: Number(data.interval) || 5,
@@ -132,32 +152,40 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
         await this.env.OAUTH_KV.delete(key);
         return fail(410, "Device code expired. Start again with github_connect_account.");
       }
+      const clientId = this.env.GITHUB_OAUTH_CLIENT_ID;
+      if (!clientId) return fail(500, "GITHUB_OAUTH_CLIENT_ID is not configured in the Worker.");
+
       const response = await fetch("https://github.com/login/oauth/access_token", {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          client_id: this.env.GITHUB_OAUTH_CLIENT_ID,
+          client_id: clientId,
           device_code: pending.device_code,
           grant_type: "urn:ietf:params:oauth:grant-type:device_code",
         }),
       });
-      const data = await response.json() as any;
-      if (data.error === "authorization_pending") return result({ status: "pending", retry_after_seconds: pending.interval });
-      if (data.error === "slow_down") {
+      const parsed = await readOAuthJson(response);
+      if (parsed.error) return parsed.error;
+      const data = parsed.data;
+      if (data?.error === "authorization_pending") return result({ status: "pending", retry_after_seconds: pending.interval });
+      if (data?.error === "slow_down") {
         pending.interval += 5;
         await this.env.OAUTH_KV.put(key, JSON.stringify(pending), { expirationTtl: Math.max(60, Math.ceil((pending.expires_at - Date.now()) / 1000)) });
         return result({ status: "slow_down", retry_after_seconds: pending.interval });
       }
-      if (data.error === "expired_token" || data.error === "access_denied") {
+      if (data?.error === "expired_token" || data?.error === "access_denied") {
         await this.env.OAUTH_KV.delete(key);
         return fail(400, data.error === "access_denied" ? "GitHub authorization was denied." : "Device code expired. Start again.");
       }
-      if (!response.ok || !data.access_token) return fail(response.status, JSON.stringify(data));
+      if (!response.ok || !data?.access_token) return fail(response.ok ? 502 : response.status, JSON.stringify(data ?? { error: "GitHub did not return an access token." }));
+
       const linkedUserResponse = await fetch("https://api.github.com/user", {
         headers: { Authorization: `Bearer ${data.access_token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
       });
-      const linkedUser = await linkedUserResponse.json() as any;
-      if (!linkedUserResponse.ok || !linkedUser.login) return fail(linkedUserResponse.status, JSON.stringify(linkedUser));
+      const linkedUserParsed = await readOAuthJson(linkedUserResponse);
+      if (linkedUserParsed.error) return linkedUserParsed.error;
+      const linkedUser = linkedUserParsed.data;
+      if (!linkedUserResponse.ok || !linkedUser?.login) return fail(linkedUserResponse.ok ? 502 : linkedUserResponse.status, JSON.stringify(linkedUser ?? { error: "GitHub user response was missing a login." }));
       if (linkedUser.login.toLowerCase() === props.login.toLowerCase()) {
         await this.env.OAUTH_KV.delete(key);
         return fail(400, "This is already the primary authenticated account.");
