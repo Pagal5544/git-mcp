@@ -10,8 +10,9 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
   server = new McpServer({ name: "git-mcp", version: "2.1.0" });
 
   async init() {
-    const accessToken = this.props?.accessToken;
-    if (!accessToken) {
+    const props = this.props;
+    const accessToken = props?.accessToken;
+    if (!props?.login || !accessToken) {
       throw new Error("GitHub OAuth session is missing its access token. Reconnect this MCP server through GitHub OAuth.");
     }
 
@@ -44,9 +45,9 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64(record.iv) }, key, fromBase64(record.ciphertext));
       return new TextDecoder().decode(plain);
     };
-    const linkedKey = (login: string) => `linked-account:${this.props.login.toLowerCase()}:${login.toLowerCase()}`;
+    const linkedKey = (login: string) => `linked-account:${props.login.toLowerCase()}:${login.toLowerCase()}`;
     const getLinkedToken = async (login: string) => {
-      if (login.toLowerCase() === this.props.login.toLowerCase()) return accessToken;
+      if (login.toLowerCase() === props.login.toLowerCase()) return accessToken;
       const stored = await this.env.OAUTH_KV.get(linkedKey(login));
       if (!stored) throw new Error(`Account ${login} is not linked. Use github_connect_account first.`);
       try { return await decryptToken(JSON.parse(stored)); }
@@ -54,7 +55,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
     };
 
     const repoApiFor = (owner?: string, repo?: string) => {
-      const targetOwner = owner?.trim() || this.props.login || this.env.GITHUB_OWNER;
+      const targetOwner = owner?.trim() || props.login || this.env.GITHUB_OWNER;
       const targetRepo = repo?.trim() || this.env.GITHUB_REPO;
       if (!/^[A-Za-z0-9_.-]+$/.test(targetOwner) || !/^[A-Za-z0-9_.-]+$/.test(targetRepo) ||
           targetOwner === "." || targetOwner === ".." || targetRepo === "." || targetRepo === "..") {
@@ -90,7 +91,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       const normalized = value.replace(/\s/g, "");
       const binary = atob(normalized);
       const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
     };
     const getFile = (path: string, ref?: string, owner?: string, repo?: string) => {
       const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
@@ -106,7 +107,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       const data = await response.json() as any;
       if (!response.ok || !data.device_code || !data.user_code) return fail(response.status, JSON.stringify(data));
       const authorizationId = crypto.randomUUID();
-      await this.env.OAUTH_KV.put(`device-flow:${this.props.login}:${authorizationId}`, JSON.stringify({
+      await this.env.OAUTH_KV.put(`device-flow:${props.login}:${authorizationId}`, JSON.stringify({
         device_code: data.device_code, interval: Number(data.interval) || 5,
         expires_at: Date.now() + (Number(data.expires_in) || 900) * 1000,
       }), { expirationTtl: Number(data.expires_in) || 900 });
@@ -123,7 +124,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
     this.server.tool("github_poll_account_authorization", "Poll a pending GitHub Device Flow authorization and securely link the approved account", {
       authorization_id: z.string().uuid(),
     }, async ({ authorization_id }) => {
-      const key = `device-flow:${this.props.login}:${authorization_id}`;
+      const key = `device-flow:${props.login}:${authorization_id}`;
       const stored = await this.env.OAUTH_KV.get(key);
       if (!stored) return fail(404, "Authorization request not found or expired. Start again with github_connect_account.");
       const pending = JSON.parse(stored) as { device_code: string; interval: number; expires_at: number };
@@ -157,7 +158,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       });
       const linkedUser = await linkedUserResponse.json() as any;
       if (!linkedUserResponse.ok || !linkedUser.login) return fail(linkedUserResponse.status, JSON.stringify(linkedUser));
-      if (linkedUser.login.toLowerCase() === this.props.login.toLowerCase()) {
+      if (linkedUser.login.toLowerCase() === props.login.toLowerCase()) {
         await this.env.OAUTH_KV.delete(key);
         return fail(400, "This is already the primary authenticated account.");
       }
@@ -170,7 +171,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
     });
 
     this.server.tool("github_list_authorized_accounts", "List the primary GitHub identity and all additional linked accounts", {}, async () => {
-      const prefix = `linked-account:${this.props.login.toLowerCase()}:`;
+      const prefix = `linked-account:${props.login.toLowerCase()}:`;
       const listed = await this.env.OAUTH_KV.list({ prefix });
       const linked = await Promise.all(listed.keys.map(async item => {
         const raw = await this.env.OAUTH_KV.get(item.name);
@@ -180,13 +181,13 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
           return { login: account.login, name: account.name || null, linked_at: account.linked_at || null };
         } catch { return null; }
       }));
-      return result({ primary: this.props.login, linked_accounts: linked.filter(Boolean) });
+      return result({ primary: props.login, linked_accounts: linked.filter(Boolean) });
     });
 
     this.server.tool("github_disconnect_account", "Unlink an additional GitHub account from this primary MCP identity", {
       account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
     }, async ({ account }) => {
-      if (account.toLowerCase() === this.props.login.toLowerCase()) return fail(400, "The primary account cannot be disconnected with this tool.");
+      if (account.toLowerCase() === props.login.toLowerCase()) return fail(400, "The primary account cannot be disconnected with this tool.");
       const key = linkedKey(account);
       const existing = await this.env.OAUTH_KV.get(key);
       if (!existing) return fail(404, `Account ${account} is not linked.`);
@@ -196,7 +197,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
 
     this.server.tool("github_authenticated_user", "Show which GitHub account is authorized for the current MCP OAuth session", {}, async () => {
       const r = await api("/user"); const j = await readJson(r);
-      return j.error ?? result({ login: j.data.login, id: j.data.id, name: j.data.name, email: this.props.email });
+      return j.error ?? result({ login: j.data.login, id: j.data.id, name: j.data.name, email: props.email });
     });
 
     this.server.tool("github_repo_info", "Get information about the selected GitHub repository", {
