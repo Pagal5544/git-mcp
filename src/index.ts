@@ -112,7 +112,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
           if (!raw.ok) return fail(raw.status, await raw.text());
           text = await raw.text();
         }
-        return result({ path: j.data.path, sha: j.data.sha, size: j.data.size, html_url: j.data.html_url, content: text });
+        return result({ path: j.data.path, sha: j.data.sha, size: j.data.size, html_url: j.data.html_url, file_content: text });
       } catch (error) {
         return fail(500, `Unable to decode file content: ${error instanceof Error ? error.message : String(error)}`);
       }
