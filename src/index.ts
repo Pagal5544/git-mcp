@@ -117,7 +117,7 @@ export class GitMcp extends McpAgent<Env, Record<string, never>, Props> {
       const response = await fetch("https://github.com/login/device/code", {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ client_id: clientId, scope: "read:user repo workflow" }),
+        body: new URLSearchParams({ client_id: clientId, scope: "read:user repo workflow delete_repo" }),
       });
       const parsed = await readOAuthJson(response);
       if (parsed.error) return parsed.error;
