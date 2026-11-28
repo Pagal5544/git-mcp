@@ -24,7 +24,7 @@ app.get("/authorize", async (c) => {
   if (await isClientApproved(c.req.raw, clientId, c.env.COOKIE_ENCRYPTION_KEY)) {
     const { stateToken } = await createOAuthState(oauthReqInfo, c.env.OAUTH_KV);
     const { setCookie } = await bindStateToSession(stateToken);
-    return redirectToGithub(c.req.raw, stateToken, c.env.GITHUB_OAUTH_CLIENT_ID, setCookie);
+    return redirectToGithub(c.req.raw, stateToken, c.env.GITHUB_OAUTH_CLIENT_ID, { "Set-Cookie": setCookie });
   }
 
   const { token: csrfToken, setCookie } = generateCSRFProtection();
